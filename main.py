@@ -1,0 +1,47 @@
+"""Dynasty AI GM — CLI entry point."""
+import typer
+from rich.console import Console
+from rich.markdown import Markdown
+from langchain_core.messages import HumanMessage
+
+app = typer.Typer()
+console = Console()
+
+
+def _run(question: str):
+    from src.graph.dynasty_graph import graph
+
+    console.print(f"\n[bold cyan]You:[/bold cyan] {question}\n")
+    result = graph.invoke({"messages": [HumanMessage(content=question)], "agent": ""})
+    last_message = result["messages"][-1]
+    console.print("[bold green]Dynasty GM:[/bold green]")
+    console.print(Markdown(last_message.content))
+    console.print()
+
+
+@app.command()
+def ask(question: str = typer.Argument(..., help="Your dynasty fantasy football question")):
+    """Ask the Dynasty AI GM a single question."""
+    _run(question)
+
+
+@app.command()
+def chat():
+    """Start an interactive chat session with the Dynasty AI GM."""
+    console.print("[bold]Dynasty AI GM[/bold] — type [italic]exit[/italic] or [italic]quit[/italic] to stop.\n")
+    while True:
+        try:
+            question = console.input("[bold cyan]You:[/bold cyan] ").strip()
+        except (EOFError, KeyboardInterrupt):
+            console.print("\nGoodbye!")
+            break
+        if not question:
+            continue
+        if question.lower() in ("exit", "quit"):
+            console.print("Goodbye!")
+            break
+        _run(question)
+
+
+if __name__ == "__main__":
+    app()
