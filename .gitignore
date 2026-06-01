@@ -35,6 +35,7 @@ Thumbs.db
 
 # LangGraph / LangSmith
 .langgraph_cache/
+.langgraph_api/
 langgraph.json.lock
 
 # Logs

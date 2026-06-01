@@ -9,13 +9,24 @@ app = typer.Typer()
 console = Console()
 
 
+def _get_graph():
+    from langgraph.checkpoint.memory import MemorySaver
+    from src.graph.dynasty_graph import _build_graph
+    return _build_graph(checkpointer=MemorySaver())
+
+
+_graph = None
+
+
 def _run(question: str, thread_id: str, echo: bool = True):
-    from src.graph.dynasty_graph import graph
+    global _graph
+    if _graph is None:
+        _graph = _get_graph()
 
     config = {"configurable": {"thread_id": thread_id}}
     if echo:
         console.print(f"\n[bold cyan]You:[/bold cyan] {question}\n")
-    result = graph.invoke(
+    result = _graph.invoke(
         {
             "messages": [HumanMessage(content=question)],
             "agent": "",

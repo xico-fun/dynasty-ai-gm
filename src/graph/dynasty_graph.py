@@ -17,7 +17,6 @@ from typing import Annotated, Literal
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.tools import BaseTool
-from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
@@ -124,7 +123,7 @@ def orchestrator_node(state: DynastyState) -> dict:
         "",
     )
     response = llm.invoke([
-        SystemMessage(content=ORCHESTRATOR_SYSTEM),
+        _cached_system(ORCHESTRATOR_SYSTEM),
         HumanMessage(content=last_human),
     ])
     try:
@@ -132,10 +131,8 @@ def orchestrator_node(state: DynastyState) -> dict:
         match = re.search(r"\{.*\}", raw, re.DOTALL)
         data = json.loads(match.group() if match else raw)
         plan = [a for a in data.get("plan", []) if a in SPECIALISTS]
-        intro = data.get("intro", "Let me work through this step by step.")
     except (json.JSONDecodeError, AttributeError, ValueError):
         plan = ["general"]
-        intro = "Let me look into that for you."
 
     if not plan:
         plan = ["general"]
@@ -151,9 +148,18 @@ def orchestrator_node(state: DynastyState) -> dict:
 # Agent nodes
 # ---------------------------------------------------------------------------
 
+def _cached_system(content: str) -> SystemMessage:
+    """Wrap a system prompt with Anthropic cache_control for ~10x cheaper hits."""
+    return SystemMessage(content=[{
+        "type": "text",
+        "text": content,
+        "cache_control": {"type": "ephemeral"},
+    }])
+
+
 def _make_agent_node(llm_with_tools, system_prompt: str):
     def node(state: DynastyState) -> dict:
-        messages = [SystemMessage(content=system_prompt)] + state["messages"]
+        messages = [_cached_system(system_prompt)] + state["messages"]
         response = llm_with_tools.invoke(messages)
         return {"messages": [response]}
     return node
@@ -179,7 +185,7 @@ def plan_advance(state: DynastyState) -> dict:
         next_agent = state["plan"][next_index]
         current_agent = state["plan"][state["plan_index"]]
         # Anthropic requires conversations to end with a HumanMessage.
-        # This handoff bridges the two specialists and satisfies that constraint.
+        # This handoff bridges specialists and satisfies that constraint.
         handoff = HumanMessage(
             content=(
                 f"The {current_agent} analysis above is complete. "
@@ -211,7 +217,7 @@ def should_advance_or_end(
 # Graph builder
 # ---------------------------------------------------------------------------
 
-def build_graph():
+def _build_graph(checkpointer=None):
     matchup_llm, matchup_prompt, matchup_tools = build_matchup_agent()
     trade_llm, trade_prompt, trade_tools = build_trade_agent()
     waiver_llm, waiver_prompt, waiver_tools = build_waiver_agent()
@@ -238,7 +244,7 @@ def build_graph():
         system = LEAGUE_CONTEXT_PREFIX + (
             "You are a helpful dynasty fantasy football assistant."
         )
-        messages = [SystemMessage(content=system), *state["messages"]]
+        messages = [_cached_system(system), *state["messages"]]
         response = general_llm.invoke(messages)
         return {"messages": [response]}
 
@@ -298,7 +304,12 @@ def build_graph():
         "__end__": END,
     })
 
-    return sg.compile(checkpointer=MemorySaver())
+    return sg.compile(checkpointer=checkpointer)
 
 
-graph = build_graph()
+def build_graph(checkpointer=None):
+    return _build_graph(checkpointer=checkpointer)
+
+
+# LangGraph Studio: no checkpointer (platform handles persistence)
+graph = _build_graph()
