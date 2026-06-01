@@ -1,12 +1,12 @@
 """Tavily search tools for news, waiver intel, and trade values."""
-from langchain_community.tools.tavily_search import TavilySearchResults
+from langchain_tavily import TavilySearch
 from langchain_core.tools import tool
 from src.config import TAVILY_API_KEY
 import os
 
 os.environ["TAVILY_API_KEY"] = TAVILY_API_KEY
 
-_search = TavilySearchResults(max_results=5)
+_search = TavilySearch(max_results=5)
 
 
 @tool

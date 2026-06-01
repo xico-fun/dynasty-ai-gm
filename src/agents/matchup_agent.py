@@ -1,12 +1,16 @@
 """Matchup agent — start/sit recommendations for the current week."""
 from langchain_anthropic import ChatAnthropic
-from langchain_core.messages import HumanMessage, SystemMessage
-from src.tools.sleeper_tools import get_my_roster, get_matchups, get_nfl_state
+from src.tools.sleeper_tools import (
+    get_my_roster_enriched, get_matchups, get_nfl_state,
+)
 from src.tools.weather_tools import get_game_weather
-from src.tools.odds_tools import get_nfl_game_odds, get_player_props, get_nfl_events
+from src.tools.odds_tools import (
+    get_nfl_game_odds, get_player_props, get_nfl_events,
+)
 from src.config import ANTHROPIC_API_KEY
+from src.league_context import LEAGUE_CONTEXT_PREFIX
 
-SYSTEM_PROMPT = """You are an expert dynasty fantasy football analyst.
+SYSTEM_PROMPT = LEAGUE_CONTEXT_PREFIX + """You are an expert dynasty fantasy football analyst.
 Your job is to provide start/sit recommendations for this week's matchup.
 
 Consider the following factors:
@@ -18,7 +22,7 @@ Consider the following factors:
 Be concise but specific. Always cite your reasoning."""
 
 TOOLS = [
-    get_my_roster,
+    get_my_roster_enriched,
     get_matchups,
     get_nfl_state,
     get_game_weather,
