@@ -27,6 +27,8 @@ from src.agents.trade_agent import build_trade_agent
 from src.agents.waiver_agent import build_waiver_agent
 from src.config import ANTHROPIC_API_KEY
 from src.league_context import LEAGUE_CONTEXT_PREFIX
+from src.style_guide import STYLE_GUIDE
+from src.strategy import STRATEGY_PREFIX
 
 SPECIALISTS = ("matchup", "trade", "waiver", "general")
 
@@ -149,7 +151,7 @@ def orchestrator_node(state: DynastyState) -> dict:
 # ---------------------------------------------------------------------------
 
 def _cached_system(content: str) -> SystemMessage:
-    """Wrap a system prompt with Anthropic cache_control for ~10x cheaper hits."""
+    """Wrap a system prompt with cache_control for ~10x cheaper hits."""
     return SystemMessage(content=[{
         "type": "text",
         "text": content,
@@ -241,8 +243,10 @@ def _build_graph(checkpointer=None):
     tool_node = ToolNode(all_tools)
 
     def general_node(state: DynastyState) -> dict:
-        system = LEAGUE_CONTEXT_PREFIX + (
-            "You are a helpful dynasty fantasy football assistant."
+        system = LEAGUE_CONTEXT_PREFIX + STRATEGY_PREFIX + STYLE_GUIDE + (
+            "\n## Your Role\n"
+            "You are a dynasty fantasy football assistant. "
+            "Answer directly and concisely."
         )
         messages = [_cached_system(system), *state["messages"]]
         response = general_llm.invoke(messages)
