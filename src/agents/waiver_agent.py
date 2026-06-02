@@ -6,7 +6,10 @@ from src.tools.sleeper_tools import (
     get_trending_players,
     get_nfl_state,
 )
-from src.tools.search_tools import search_nfl_news, search_waiver_wire
+from src.tools.search_tools import (
+    search_player_news, search_waiver_pickups,
+    search_dynasty_analysis, search_reddit_dynasty,
+)
 from src.config import ANTHROPIC_API_KEY
 from src.league_context import LEAGUE_CONTEXT_PREFIX
 from src.style_guide import STYLE_GUIDE
@@ -29,8 +32,10 @@ TOOLS = [
     get_league_info,
     get_trending_players,
     get_nfl_state,
-    search_nfl_news,
-    search_waiver_wire,
+    search_player_news,
+    search_waiver_pickups,
+    search_dynasty_analysis,
+    search_reddit_dynasty,
 ]
 
 

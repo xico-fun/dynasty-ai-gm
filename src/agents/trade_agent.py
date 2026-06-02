@@ -3,7 +3,10 @@ from langchain_anthropic import ChatAnthropic
 from src.tools.sleeper_tools import (
     get_my_roster_enriched, get_league_rosters_enriched,
 )
-from src.tools.search_tools import get_trade_value, search_trade_advice
+from src.tools.search_tools import (
+    get_trade_value, search_trade_advice,
+    search_dynasty_analysis, search_reddit_dynasty,
+)
 from src.config import ANTHROPIC_API_KEY
 from src.league_context import LEAGUE_CONTEXT_PREFIX
 from src.style_guide import STYLE_GUIDE
@@ -26,6 +29,8 @@ TOOLS = [
     get_league_rosters_enriched,
     get_trade_value,
     search_trade_advice,
+    search_dynasty_analysis,
+    search_reddit_dynasty,
 ]
 
 

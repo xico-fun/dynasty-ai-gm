@@ -27,6 +27,7 @@ from src.agents.trade_agent import build_trade_agent
 from src.agents.waiver_agent import build_waiver_agent
 from src.config import ANTHROPIC_API_KEY
 from src.league_context import LEAGUE_CONTEXT_PREFIX
+from src.runtime_context import get_runtime_context
 from src.style_guide import STYLE_GUIDE
 from src.strategy import STRATEGY_PREFIX
 
@@ -53,7 +54,8 @@ Classify the user's request into exactly one of these categories:
 - matchup: start/sit decisions, weather, player props, weekly lineup
 - trade: trade offers, trade values, who to target, who to sell
 - waiver: free agents, waiver wire, pickups, drops, injury news
-- general: anything else (roster questions, league info, etc.)
+- general: anything else (roster questions, league info, player news, \
+player outlooks, etc.)
 - complex: questions that clearly span MULTIPLE topics, e.g. "review my \
 lineup AND check the waiver wire", "audit my team and suggest trades AND \
 pickups", "full team review"
@@ -125,7 +127,7 @@ def orchestrator_node(state: DynastyState) -> dict:
         "",
     )
     response = llm.invoke([
-        _cached_system(ORCHESTRATOR_SYSTEM),
+        _cached_system(ORCHESTRATOR_SYSTEM, dynamic=get_runtime_context()),
         HumanMessage(content=last_human),
     ])
     try:
@@ -150,18 +152,23 @@ def orchestrator_node(state: DynastyState) -> dict:
 # Agent nodes
 # ---------------------------------------------------------------------------
 
-def _cached_system(content: str) -> SystemMessage:
-    """Wrap a system prompt with cache_control for ~10x cheaper hits."""
-    return SystemMessage(content=[{
-        "type": "text",
-        "text": content,
-        "cache_control": {"type": "ephemeral"},
-    }])
+def _cached_system(static: str, dynamic: str = "") -> SystemMessage:
+    """
+    Build a system message with two blocks:
+    - static: cached (league context, strategy, style guide)
+    - dynamic: uncached (current date — changes daily)
+    """
+    blocks = [{"type": "text", "text": static, "cache_control": {"type": "ephemeral"}}]
+    if dynamic:
+        blocks.append({"type": "text", "text": dynamic})
+    return SystemMessage(content=blocks)
 
 
 def _make_agent_node(llm_with_tools, system_prompt: str):
     def node(state: DynastyState) -> dict:
-        messages = [_cached_system(system_prompt)] + state["messages"]
+        messages = [
+            _cached_system(system_prompt, dynamic=get_runtime_context())
+        ] + state["messages"]
         response = llm_with_tools.invoke(messages)
         return {"messages": [response]}
     return node
@@ -228,9 +235,13 @@ def _build_graph(checkpointer=None):
         get_my_roster_enriched, get_league_rosters_enriched,
         get_league_info, get_nfl_state,
     )
+    from src.tools.search_tools import (
+        search_player_news, search_dynasty_analysis, search_reddit_dynasty,
+    )
     general_tools = [
         get_my_roster_enriched, get_league_rosters_enriched,
         get_league_info, get_nfl_state,
+        search_player_news, search_dynasty_analysis, search_reddit_dynasty,
     ]
     general_llm = ChatAnthropic(
         model="claude-opus-4-8", api_key=ANTHROPIC_API_KEY,
@@ -243,12 +254,14 @@ def _build_graph(checkpointer=None):
     tool_node = ToolNode(all_tools)
 
     def general_node(state: DynastyState) -> dict:
-        system = LEAGUE_CONTEXT_PREFIX + STRATEGY_PREFIX + STYLE_GUIDE + (
-            "\n## Your Role\n"
+        static = LEAGUE_CONTEXT_PREFIX + STRATEGY_PREFIX + STYLE_GUIDE
+        dynamic = (
+            get_runtime_context()
+            + "\n## Your Role\n"
             "You are a dynasty fantasy football assistant. "
             "Answer directly and concisely."
         )
-        messages = [_cached_system(system), *state["messages"]]
+        messages = [_cached_system(static, dynamic=dynamic), *state["messages"]]
         response = general_llm.invoke(messages)
         return {"messages": [response]}
 

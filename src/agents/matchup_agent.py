@@ -7,6 +7,7 @@ from src.tools.weather_tools import get_game_weather
 from src.tools.odds_tools import (
     get_nfl_game_odds, get_player_props, get_nfl_events,
 )
+from src.tools.search_tools import search_player_news, search_dynasty_analysis
 from src.config import ANTHROPIC_API_KEY
 from src.league_context import LEAGUE_CONTEXT_PREFIX
 from src.style_guide import STYLE_GUIDE
@@ -32,6 +33,8 @@ TOOLS = [
     get_nfl_game_odds,
     get_player_props,
     get_nfl_events,
+    search_player_news,
+    search_dynasty_analysis,
 ]
 
 
