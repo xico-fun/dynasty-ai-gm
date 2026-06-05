@@ -1,6 +1,9 @@
 """Dynasty AI GM — FastAPI backend."""
+import hashlib
 import json
+import re
 import uuid
+from pathlib import Path
 from typing import AsyncIterator
 
 from fastapi import FastAPI, HTTPException
@@ -10,8 +13,13 @@ from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.memory import MemorySaver
 from pydantic import BaseModel
 
+from src.agents.matchup_preview_agent import generate_matchup_preview
+from src.config import ANTHROPIC_API_KEY
 from src.graph.dynasty_graph import _build_graph
 from src.tools.sleeper_tools import _build_enriched_rosters
+
+CACHE_DIR = Path(__file__).parent.parent / "cache"
+PREVIEW_CACHE = CACHE_DIR / "matchup_preview.json"
 
 app = FastAPI(title="Dynasty AI GM API")
 
@@ -180,7 +188,7 @@ def get_dashboard():
             "is_me": oid == user_id,
         })
 
-    # Matchup — try regardless of season type; dynasty leagues have year-round matchups
+    # Matchup — try regardless of season type; dynasty leagues have year-round
     matchup = None
     if week > 0 and my_roster_id:
         try:
@@ -203,28 +211,45 @@ def get_dashboard():
                 )
                 if opp_m:
                     opp_roster = next(
-                        (r for r in rosters if r["roster_id"] == opp_m["roster_id"]),
+                        (
+                            r for r in rosters
+                            if r["roster_id"] == opp_m["roster_id"]
+                        ),
                         {},
                     )
                     opp_user = user_map.get(opp_roster.get("owner_id", ""), {})
                     players = _get_all_players()
+
+                    def _player_obj(pid):
+                        p = players.get(str(pid), {})
+                        first = p.get("first_name", "")
+                        last = p.get("last_name", "")
+                        name = f"{first} {last}".strip() or f"Unknown ({pid})"
+                        return {
+                            "id": str(pid),
+                            "name": name,
+                            "position": p.get("position", "?"),
+                            "team": p.get("team") or "FA",
+                        }
+
+                    my_ids = my_m.get("starters") or []
+                    opp_ids = opp_m.get("starters") or []
+                    starters_hash = hashlib.md5(
+                        "|".join(sorted(my_ids) + sorted(opp_ids)).encode()
+                    ).hexdigest()[:10]
+
                     matchup = {
                         "week": week,
                         "my_team": team_name,
                         "my_points": my_m.get("points", 0),
-                        "my_starters": [
-                            _player_name(pid, players)
-                            for pid in (my_m.get("starters") or [])
-                        ],
+                        "my_starters": [_player_obj(pid) for pid in my_ids],
                         "opp_team": (
                             opp_user.get("metadata", {}).get("team_name")
                             or opp_user.get("display_name", "Opponent")
                         ),
                         "opp_points": opp_m.get("points", 0),
-                        "opp_starters": [
-                            _player_name(pid, players)
-                            for pid in (opp_m.get("starters") or [])
-                        ],
+                        "opp_starters": [_player_obj(pid) for pid in opp_ids],
+                        "starters_hash": starters_hash,
                     }
         except Exception:
             pass
@@ -274,6 +299,202 @@ def get_dashboard():
         "standings": standings,
         "transactions": transactions,
     }
+
+
+
+
+@app.get("/matchup-preview")
+def get_matchup_preview():
+    """Return cached matchup preview, generating it if needed."""
+    from src.tools.sleeper_tools import _get, _get_all_players
+    from src.config import SLEEPER_USERNAME, SLEEPER_LEAGUE_ID
+
+    # We need the current matchup data to check the starters hash
+    nfl_state = _get("/state/nfl")
+    week = nfl_state.get("week") or 1
+    season = nfl_state.get("season", "2026")
+    season_type = nfl_state.get("season_type", "off")
+
+    # Load cache
+    cached = None
+    if PREVIEW_CACHE.exists():
+        try:
+            cached = json.loads(PREVIEW_CACHE.read_text())
+        except Exception:
+            cached = None
+
+    # We need the matchup to get the current starters hash
+    # Re-use the dashboard matchup logic in minimal form
+    user = _get(f"/user/{SLEEPER_USERNAME}")
+    user_id = user["user_id"]
+    rosters = _get(f"/league/{SLEEPER_LEAGUE_ID}/rosters")
+    users_list = _get(f"/league/{SLEEPER_LEAGUE_ID}/users")
+    user_map = {u["user_id"]: u for u in users_list}
+    my_roster = next((r for r in rosters if r["owner_id"] == user_id), {})
+    my_roster_id = my_roster.get("roster_id")
+
+    matchup_raw = None
+    if week > 0 and my_roster_id:
+        try:
+            matchup_data = _get(
+                f"/league/{SLEEPER_LEAGUE_ID}/matchups/{week}"
+            )
+            my_m = next(
+                (m for m in matchup_data if m["roster_id"] == my_roster_id),
+                None,
+            )
+            if my_m:
+                mid = my_m["matchup_id"]
+                opp_m = next(
+                    (
+                        m for m in matchup_data
+                        if m["matchup_id"] == mid
+                        and m["roster_id"] != my_roster_id
+                    ),
+                    None,
+                )
+                if opp_m:
+                    opp_roster = next(
+                        (
+                            r for r in rosters
+                            if r["roster_id"] == opp_m["roster_id"]
+                        ),
+                        {},
+                    )
+                    opp_user = user_map.get(opp_roster.get("owner_id", ""), {})
+                    players = _get_all_players()
+
+                    def _obj(pid):
+                        p = players.get(str(pid), {})
+                        return {
+                            "id": str(pid),
+                            "name": (
+                                f"{p.get('first_name', '')} "
+                                f"{p.get('last_name', '')}".strip()
+                                or f"Unknown ({pid})"
+                            ),
+                            "position": p.get("position", "?"),
+                            "team": p.get("team") or "FA",
+                        }
+
+                    my_ids = my_m.get("starters") or []
+                    opp_ids = opp_m.get("starters") or []
+                    starters_hash = hashlib.md5(
+                        "|".join(sorted(my_ids) + sorted(opp_ids)).encode()
+                    ).hexdigest()[:10]
+                    my_meta = user_map.get(user_id, {})
+                    team_name = (
+                        my_meta.get("metadata", {}).get("team_name")
+                        or my_meta.get("display_name", "My Team")
+                    )
+                    opp_name = (
+                        opp_user.get("metadata", {}).get("team_name")
+                        or opp_user.get("display_name", "Opponent")
+                    )
+
+                    # Records
+                    my_s = my_roster.get("settings", {})
+                    opp_s = opp_roster.get("settings", {})
+                    my_record = (
+                        f"{my_s.get('wins', 0)}-{my_s.get('losses', 0)}"
+                    )
+                    opp_record = (
+                        f"{opp_s.get('wins', 0)}-{opp_s.get('losses', 0)}"
+                    )
+
+                    # Standings positions
+                    def _rank_key(r):
+                        s = r.get("settings", {})
+                        return (-s.get("wins", 0), -s.get("fpts", 0))
+                    ranked = sorted(rosters, key=_rank_key)
+                    rid_to_rank = {
+                        r["roster_id"]: i + 1
+                        for i, r in enumerate(ranked)
+                    }
+                    my_rank = rid_to_rank.get(my_roster_id, "?")
+                    opp_rank = rid_to_rank.get(opp_m["roster_id"], "?")
+
+                    # Bench players (cap at 10 to keep prompt manageable)
+                    my_all = my_roster.get("players") or []
+                    opp_all = opp_roster.get("players") or []
+                    my_bench = [
+                        _obj(p) for p in my_all
+                        if p not in my_ids
+                    ][:10]
+                    opp_bench = [
+                        _obj(p) for p in opp_all
+                        if p not in opp_ids
+                    ][:10]
+
+                    matchup_raw = {
+                        "week": week,
+                        "my_team": team_name,
+                        "my_record": my_record,
+                        "my_rank": my_rank,
+                        "my_starters": [_obj(pid) for pid in my_ids],
+                        "my_bench": my_bench,
+                        "opp_team": opp_name,
+                        "opp_record": opp_record,
+                        "opp_rank": opp_rank,
+                        "opp_starters": [_obj(pid) for pid in opp_ids],
+                        "opp_bench": opp_bench,
+                        "starters_hash": starters_hash,
+                        "total_teams": len(rosters),
+                    }
+        except Exception:
+            pass
+
+    if not matchup_raw:
+        return {"preview": None, "lineup_changed": False}
+
+    current_hash = matchup_raw["starters_hash"]
+
+    # Cache hit — same week and same starters
+    if (
+        cached
+        and cached.get("week") == week
+        and cached.get("season") == season
+        and cached.get("starters_hash") == current_hash
+    ):
+        return {
+            "preview": cached["content"],
+            "lineup_changed": False,
+            "cached": True,
+        }
+
+    # Starters changed but we have a cached preview for this week
+    lineup_changed = (
+        cached is not None
+        and cached.get("week") == week
+        and cached.get("season") == season
+        and cached.get("starters_hash") != current_hash
+    )
+    if lineup_changed:
+        return {
+            "preview": cached["content"],
+            "lineup_changed": True,
+            "cached": True,
+        }
+
+    # No valid cache — generate
+    content = generate_matchup_preview(matchup_raw, season_type)
+    CACHE_DIR.mkdir(exist_ok=True)
+    PREVIEW_CACHE.write_text(json.dumps({
+        "week": week,
+        "season": season,
+        "starters_hash": current_hash,
+        "content": content,
+    }))
+    return {"preview": content, "lineup_changed": False, "cached": False}
+
+
+@app.post("/matchup-preview/regenerate")
+def regenerate_matchup_preview():
+    """Force-regenerate the matchup preview and update the cache."""
+    # Delete cache and re-use get logic
+    if PREVIEW_CACHE.exists():
+        PREVIEW_CACHE.unlink()
+    return get_matchup_preview()
 
 
 @app.get("/thread/{thread_id}/history")

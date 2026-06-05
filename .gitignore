@@ -46,3 +46,6 @@ langgraph.json.lock
 # Logs
 *.log
 logs/
+
+# Generated cache (matchup previews, etc.)
+cache/
