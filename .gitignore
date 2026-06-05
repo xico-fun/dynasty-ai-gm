@@ -23,6 +23,11 @@ env/
 ENV/
 .python-version
 
+# Next.js
+web/.next/
+web/node_modules/
+web/.env.local
+
 # IDE
 .vscode/
 .idea/
