@@ -60,6 +60,22 @@ type PreviewState =
   | { status: "done"; data: PreviewData; lineupChanged: boolean }
   | { status: "none" };
 
+type SpotlightPlayer = {
+  name: string;
+  position: string;
+  team: string;
+  role: "key" | "dud_risk" | "boom";
+  projected_stats: string;
+  vegas: string;
+  matchup_history: string | null;
+  note: string;
+};
+
+type SpotlightState =
+  | { status: "loading" }
+  | { status: "done"; players: SpotlightPlayer[] }
+  | { status: "none" };
+
 function renderBold(text: string) {
   // Strip any markdown headers/leading hashes the LLM might produce
   const cleaned = text.replace(/^#{1,6}\s*/gm, "").trim();
@@ -84,13 +100,17 @@ export default function Dashboard() {
   const [error, setError] = useState(false);
   const [preview, setPreview] = useState<PreviewState>({ status: "none" });
   const [regenerating, setRegenerating] = useState(false);
+  const [spotlight, setSpotlight] = useState<SpotlightState>({ status: "none" });
 
   useEffect(() => {
     fetch(`${API}/dashboard`)
       .then(r => { if (!r.ok) throw new Error(); return r.json(); })
       .then(d => {
         setData(d);
-        if (d.matchup) fetchPreview();
+        if (d.matchup) {
+          fetchPreview();
+          fetchSpotlight();
+        }
       })
       .catch(() => setError(true));
   }, []);
@@ -111,6 +131,21 @@ export default function Dashboard() {
         }
       })
       .catch(() => setPreview({ status: "none" }));
+  }
+
+  function fetchSpotlight() {
+    setSpotlight({ status: "loading" });
+    fetch(`${API}/matchup-spotlight`)
+      .then(r => r.json())
+      .then(s => {
+        const players = s.spotlight?.players;
+        if (players?.length) {
+          setSpotlight({ status: "done", players });
+        } else {
+          setSpotlight({ status: "none" });
+        }
+      })
+      .catch(() => setSpotlight({ status: "none" }));
   }
 
   async function regeneratePreview() {
@@ -157,6 +192,7 @@ export default function Dashboard() {
               preview={preview}
               regenerating={regenerating}
               onRegenerate={regeneratePreview}
+              spotlight={spotlight}
             />
           ) : (
             <div className="flex flex-col items-center justify-center h-full gap-2"
@@ -182,14 +218,14 @@ function MatchupCard({
   preview,
   regenerating,
   onRegenerate,
+  spotlight,
 }: {
   matchup: Matchup;
   preview: PreviewState;
   regenerating: boolean;
   onRegenerate: () => void;
+  spotlight: SpotlightState;
 }) {
-  const maxRows = Math.max(matchup.my_starters.length, matchup.opp_starters.length);
-
   return (
     <>
       {/* Header strip */}
@@ -203,11 +239,14 @@ function MatchupCard({
         </div>
         <div className="flex flex-col items-center px-6 shrink-0">
           <div className="flex items-baseline gap-3">
-            <span className="text-2xl font-bold" style={{ color: "var(--accent)" }}>
+            <span className="text-2xl font-bold"
+              style={{ color: "var(--accent)", textShadow: "0 0 10px #22c55e55" }}>
               {matchup.my_points}
             </span>
             <span className="text-sm" style={{ color: "var(--muted)" }}>vs</span>
-            <span className="text-2xl font-bold">{matchup.opp_points}</span>
+            <span className="text-2xl font-bold" style={{ color: "var(--foreground)" }}>
+              {matchup.opp_points}
+            </span>
           </div>
         </div>
         <div className="flex-1 min-w-0 text-right">
@@ -241,51 +280,103 @@ function MatchupCard({
         )}
       </div>
 
-      {/* Player rows */}
+      {/* Spotlight */}
       <div className="flex-1 overflow-y-auto">
-        {Array.from({ length: maxRows }).map((_, i) => {
-          const mine = matchup.my_starters[i];
-          const theirs = matchup.opp_starters[i];
-          const pos = mine?.position ?? theirs?.position ?? "?";
-          const color = POS_COLOR[pos] ?? "var(--muted)";
-
-          return (
-            <div key={i}
-              className="grid items-center px-5 py-2.5 border-b last:border-0"
-              style={{
-                borderColor: "var(--border)",
-                gridTemplateColumns: "1fr auto 1fr",
-              }}>
-              {/* My player — left aligned */}
-              {mine ? (
-                <div>
-                  <p className="text-sm font-medium">{mine.name}</p>
-                  <p className="text-xs" style={{ color: "var(--muted)" }}>
-                    {mine.position} · {mine.team}
-                  </p>
-                </div>
-              ) : <div />}
-
-              {/* Position badge — centered */}
-              <div className="mx-4 px-2.5 py-0.5 rounded-md text-xs font-bold"
-                style={{ background: color + "22", color }}>
-                {pos}
-              </div>
-
-              {/* Opponent player — right aligned */}
-              {theirs ? (
-                <div className="text-right">
-                  <p className="text-sm font-medium">{theirs.name}</p>
-                  <p className="text-xs" style={{ color: "var(--muted)" }}>
-                    {theirs.position} · {theirs.team}
-                  </p>
-                </div>
-              ) : <div />}
-            </div>
-          );
-        })}
+        {spotlight.status === "loading" && (
+          <div className="flex items-center justify-center h-full">
+            <p className="text-xs italic" style={{ color: "var(--muted)" }}>
+              Building roster spotlight…
+            </p>
+          </div>
+        )}
+        {spotlight.status === "done" && (
+          <div className="p-4 space-y-3">
+            {spotlight.players.map((p, i) => (
+              <SpotlightCard key={i} player={p} />
+            ))}
+          </div>
+        )}
+        {spotlight.status === "none" && (
+          <div className="flex items-center justify-center h-full">
+            <p className="text-xs" style={{ color: "var(--muted)" }}>
+              No spotlight available
+            </p>
+          </div>
+        )}
       </div>
     </>
+  );
+}
+
+const ROLE_CONFIG = {
+  key:      { label: "Key Player", color: "var(--accent)" },
+  dud_risk: { label: "⚠ Dud Risk", color: "var(--warning)" },
+  boom:     { label: "💥 Boom",    color: "#3b82f6" },
+};
+
+function SpotlightCard({ player }: { player: SpotlightPlayer }) {
+  const role = ROLE_CONFIG[player.role] ?? ROLE_CONFIG.key;
+  const posColor = POS_COLOR[player.position] ?? "var(--muted)";
+
+  return (
+    <div className="rounded-xl border p-3"
+      style={{ borderColor: "var(--border)", background: "var(--surface-hover)" }}>
+      {/* Name row */}
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-xs font-bold px-2 py-0.5 rounded"
+            style={{ background: posColor + "22", color: posColor }}>
+            {player.position}
+          </span>
+          <p className="text-sm font-semibold truncate">{player.name}</p>
+          <p className="text-xs shrink-0" style={{ color: "var(--muted)" }}>
+            {player.team}
+          </p>
+        </div>
+        <span className="text-xs font-semibold shrink-0 px-2 py-0.5 rounded"
+          style={{ background: role.color + "22", color: role.color }}>
+          {role.label}
+        </span>
+      </div>
+
+      {/* Stats row */}
+      <div className="grid grid-cols-2 gap-x-4 gap-y-1 mb-2">
+        {player.projected_stats && (
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide mb-0.5"
+              style={{ color: "var(--muted)" }}>Projection</p>
+            <p className="text-xs" style={{ color: "var(--foreground)" }}>
+              {player.projected_stats}
+            </p>
+          </div>
+        )}
+        {player.vegas && (
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide mb-0.5"
+              style={{ color: "var(--muted)" }}>Vegas</p>
+            <p className="text-xs" style={{ color: "var(--foreground)" }}>
+              {player.vegas}
+            </p>
+          </div>
+        )}
+        {player.matchup_history && (
+          <div className="col-span-2">
+            <p className="text-xs font-semibold uppercase tracking-wide mb-0.5"
+              style={{ color: "var(--muted)" }}>vs Opponent</p>
+            <p className="text-xs" style={{ color: "var(--foreground)" }}>
+              {player.matchup_history}
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* Note */}
+      {player.note && (
+        <p className="text-xs italic leading-relaxed" style={{ color: "var(--muted)" }}>
+          {renderBold(player.note)}
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -364,8 +455,10 @@ function StandingsCard({ standings }: { standings: Standing[] }) {
   return (
     <div className="flex-1 flex flex-col rounded-xl border overflow-hidden"
       style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
-      <div className="px-4 py-3 border-b shrink-0"
+      <div className="px-4 py-3 border-b shrink-0 flex items-center gap-2"
         style={{ borderColor: "var(--border)" }}>
+        <span className="w-1 h-3 rounded-full shrink-0"
+          style={{ background: "var(--accent)" }} />
         <span className="text-xs font-semibold uppercase tracking-wider"
           style={{ color: "var(--muted)" }}>League Standings</span>
       </div>
@@ -411,8 +504,10 @@ function TransactionsCard({ transactions }: { transactions: Transaction[] }) {
   return (
     <div className="flex-1 flex flex-col rounded-xl border overflow-hidden"
       style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
-      <div className="px-4 py-3 border-b shrink-0"
+      <div className="px-4 py-3 border-b shrink-0 flex items-center gap-2"
         style={{ borderColor: "var(--border)" }}>
+        <span className="w-1 h-3 rounded-full shrink-0"
+          style={{ background: "var(--accent)" }} />
         <span className="text-xs font-semibold uppercase tracking-wider"
           style={{ color: "var(--muted)" }}>Recent Transactions</span>
       </div>

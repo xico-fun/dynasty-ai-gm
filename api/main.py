@@ -1,7 +1,6 @@
 """Dynasty AI GM — FastAPI backend."""
 import hashlib
 import json
-import re
 import uuid
 from pathlib import Path
 from typing import AsyncIterator
@@ -14,12 +13,20 @@ from langgraph.checkpoint.memory import MemorySaver
 from pydantic import BaseModel
 
 from src.agents.matchup_preview_agent import generate_matchup_preview
-from src.config import ANTHROPIC_API_KEY
+from src.agents.matchup_spotlight_agent import (
+    generate_spotlight,
+    cache_key as spotlight_cache_key,
+)
+from src.agents.player_preview_agent import generate_player_preview
 from src.graph.dynasty_graph import _build_graph
 from src.tools.sleeper_tools import _build_enriched_rosters
 
 CACHE_DIR = Path(__file__).parent.parent / "cache"
 PREVIEW_CACHE = CACHE_DIR / "matchup_preview.json"
+SPOTLIGHT_CACHE = CACHE_DIR / "matchup_spotlight.json"
+TEAM_NEWS_CACHE = CACHE_DIR / "team_news.json"
+TEAM_WAIVER_CACHE = CACHE_DIR / "team_waiver_adds.json"
+PLAYER_PREVIEW_DIR = CACHE_DIR / "player_previews"
 
 app = FastAPI(title="Dynasty AI GM API")
 
@@ -301,8 +308,6 @@ def get_dashboard():
     }
 
 
-
-
 @app.get("/matchup-preview")
 def get_matchup_preview():
     """Return cached matchup preview, generating it if needed."""
@@ -495,6 +500,449 @@ def regenerate_matchup_preview():
     if PREVIEW_CACHE.exists():
         PREVIEW_CACHE.unlink()
     return get_matchup_preview()
+
+
+@app.get("/matchup-spotlight")
+def get_matchup_spotlight():
+    """Return cached spotlight, generating it if needed."""
+    from src.tools.sleeper_tools import _get, _get_all_players
+    from src.config import SLEEPER_USERNAME, SLEEPER_LEAGUE_ID
+
+    nfl_state = _get("/state/nfl")
+    week = nfl_state.get("week") or 1
+    season = nfl_state.get("season", "2026")
+    season_type = nfl_state.get("season_type", "off")
+
+    ck = spotlight_cache_key(season, season_type, week)
+
+    # Load cache
+    cached = None
+    if SPOTLIGHT_CACHE.exists():
+        try:
+            cached = json.loads(SPOTLIGHT_CACHE.read_text())
+        except Exception:
+            cached = None
+
+    if cached and cached.get("cache_key") == ck:
+        return {"spotlight": cached["content"]}
+
+    # Build matchup context (same pattern as preview endpoint)
+    user = _get(f"/user/{SLEEPER_USERNAME}")
+    user_id = user["user_id"]
+    rosters = _get(f"/league/{SLEEPER_LEAGUE_ID}/rosters")
+    users_list = _get(f"/league/{SLEEPER_LEAGUE_ID}/users")
+    user_map = {u["user_id"]: u for u in users_list}
+    my_roster = next((r for r in rosters if r["owner_id"] == user_id), {})
+    my_roster_id = my_roster.get("roster_id")
+
+    matchup_raw = None
+    if week > 0 and my_roster_id:
+        try:
+            matchup_data = _get(
+                f"/league/{SLEEPER_LEAGUE_ID}/matchups/{week}"
+            )
+            my_m = next(
+                (m for m in matchup_data if m["roster_id"] == my_roster_id),
+                None,
+            )
+            if my_m:
+                mid = my_m["matchup_id"]
+                opp_m = next(
+                    (
+                        m for m in matchup_data
+                        if m["matchup_id"] == mid
+                        and m["roster_id"] != my_roster_id
+                    ),
+                    None,
+                )
+                players = _get_all_players()
+
+                def _obj(pid):
+                    p = players.get(str(pid), {})
+                    return {
+                        "id": str(pid),
+                        "name": (
+                            f"{p.get('first_name', '')} "
+                            f"{p.get('last_name', '')}".strip()
+                            or f"Unknown ({pid})"
+                        ),
+                        "position": p.get("position", "?"),
+                        "team": p.get("team") or "FA",
+                    }
+
+                my_ids = my_m.get("starters") or []
+                my_all = my_roster.get("players") or []
+                my_bench = [
+                    _obj(p) for p in my_all if p not in my_ids
+                ][:12]
+
+                opp_name = ""
+                if opp_m:
+                    opp_roster = next(
+                        (
+                            r for r in rosters
+                            if r["roster_id"] == opp_m["roster_id"]
+                        ),
+                        {},
+                    )
+                    opp_user = user_map.get(
+                        opp_roster.get("owner_id", ""), {}
+                    )
+                    opp_name = (
+                        opp_user.get("metadata", {}).get("team_name")
+                        or opp_user.get("display_name", "Opponent")
+                    )
+
+                def _rank_key(r):
+                    s = r.get("settings", {})
+                    return (-s.get("wins", 0), -s.get("fpts", 0))
+
+                ranked = sorted(rosters, key=_rank_key)
+                rid_to_rank = {
+                    r["roster_id"]: i + 1
+                    for i, r in enumerate(ranked)
+                }
+                my_meta = user_map.get(user_id, {})
+                my_s = my_roster.get("settings", {})
+                matchup_raw = {
+                    "week": week,
+                    "my_team": (
+                        my_meta.get("metadata", {}).get("team_name")
+                        or my_meta.get("display_name", "My Team")
+                    ),
+                    "my_record": (
+                        f"{my_s.get('wins', 0)}-{my_s.get('losses', 0)}"
+                    ),
+                    "my_rank": rid_to_rank.get(my_roster_id, "?"),
+                    "my_starters": [_obj(pid) for pid in my_ids],
+                    "my_bench": my_bench,
+                    "opp_team": opp_name,
+                    "total_teams": len(rosters),
+                }
+        except Exception:
+            pass
+
+    if not matchup_raw:
+        return {"spotlight": None}
+
+    content = generate_spotlight(matchup_raw, season_type)
+    CACHE_DIR.mkdir(exist_ok=True)
+    SPOTLIGHT_CACHE.write_text(json.dumps({
+        "cache_key": ck,
+        "content": content,
+    }))
+    return {"spotlight": content}
+
+
+def _my_roster_data():
+    """Shared helper — returns nfl_state + my full structured roster."""
+    from src.tools.sleeper_tools import _get, _get_all_players
+    from src.config import SLEEPER_USERNAME, SLEEPER_LEAGUE_ID
+
+    nfl_state = _get("/state/nfl")
+    week = nfl_state.get("week") or 1
+    season = nfl_state.get("season", "2026")
+    season_type = nfl_state.get("season_type", "off")
+
+    user = _get(f"/user/{SLEEPER_USERNAME}")
+    user_id = user["user_id"]
+    rosters = _get(f"/league/{SLEEPER_LEAGUE_ID}/rosters")
+    users_list = _get(f"/league/{SLEEPER_LEAGUE_ID}/users")
+    user_map = {u["user_id"]: u for u in users_list}
+    my_roster = next((r for r in rosters if r["owner_id"] == user_id), {})
+    my_meta = user_map.get(user_id, {})
+    team_name = (
+        my_meta.get("metadata", {}).get("team_name")
+        or my_meta.get("display_name", "My Team")
+    )
+    my_settings = my_roster.get("settings", {})
+
+    players_db = _get_all_players()
+
+    def _obj(pid):
+        p = players_db.get(str(pid), {})
+        return {
+            "id": str(pid),
+            "name": (
+                f"{p.get('first_name', '')} "
+                f"{p.get('last_name', '')}".strip()
+                or f"Unknown ({pid})"
+            ),
+            "position": p.get("position", "?"),
+            "team": p.get("team") or "FA",
+        }
+
+    starter_ids = my_roster.get("starters") or []
+    all_ids = my_roster.get("players") or []
+    bench_ids = [p for p in all_ids if p not in starter_ids]
+
+    return {
+        "nfl_state": nfl_state,
+        "week": week,
+        "season": season,
+        "season_type": season_type,
+        "team_name": team_name,
+        "record": (
+            f"{my_settings.get('wins', 0)}-{my_settings.get('losses', 0)}"
+        ),
+        "starters": [_obj(pid) for pid in starter_ids],
+        "bench": [_obj(pid) for pid in bench_ids],
+        "all_player_ids": set(all_ids),
+    }
+
+
+@app.get("/team/roster")
+def get_team_roster():
+    """Return the user's full structured roster."""
+    d = _my_roster_data()
+    return {
+        "team_name": d["team_name"],
+        "record": d["record"],
+        "season": d["season"],
+        "phase": d["nfl_state"].get("season_type", "off"),
+        "week": d["week"],
+        "starters": d["starters"],
+        "bench": d["bench"],
+    }
+
+
+@app.get("/team/news")
+def get_team_news():
+    """3 featured articles (top starters) + see-more per remaining starter."""
+    from src.tools.search_tools import _dynasty_search
+
+    def _search_results(searcher, q: str) -> list:
+        """Normalise Tavily response — handles both list and dict formats."""
+        raw = searcher.invoke(q)
+        if isinstance(raw, dict):
+            return raw.get("results", [])
+        return raw or []
+
+    d = _my_roster_data()
+    week = d["week"]
+    season = d["season"]
+    season_type = d["season_type"]
+    ck = (
+        f"{season}_week{week}" if season_type == "regular"
+        else f"{season}_off"
+    )
+
+    if TEAM_NEWS_CACHE.exists():
+        try:
+            cached = json.loads(TEAM_NEWS_CACHE.read_text())
+            if cached.get("cache_key") == ck:
+                return cached["content"]
+        except Exception:
+            pass
+
+    source_map = {
+        "rotowire.com": ("RotoWire", "#ef4444"),
+        "fantasypros.com": ("FantasyPros", "#3b82f6"),
+        "fantasypoints.com": ("FantasyPoints", "#8b5cf6"),
+        "espn.com": ("ESPN", "#dc2626"),
+        "nfl.com": ("NFL.com", "#1d4ed8"),
+        "reddit.com": ("Reddit", "#f97316"),
+        "dynastynerds.com": ("DynastyNerds", "#7c3aed"),
+        "dynastyleaguefootball.com": ("DLF", "#0891b2"),
+    }
+
+    def source_info(url: str):
+        domain = url.split("/")[2].replace("www.", "") if "//" in url else ""
+        name, color = source_map.get(domain, (domain or "Source", "#64748b"))
+        return name, color
+
+    def search_player(player: dict) -> dict | None:
+        name = player["name"]
+        team = player["team"]
+        if season_type != "regular":
+            queries = [
+                f"{name} 2026 fantasy season outlook",
+                f"{name} {team} dynasty 2026",
+            ]
+        else:
+            queries = [
+                f"{name} fantasy football week {week} 2026 news",
+                f"{name} {team} fantasy 2026",
+            ]
+        for q in queries:
+            try:
+                hits = _search_results(_dynasty_search, q)
+                if not hits:
+                    continue
+                r = hits[0]
+                url = r.get("url", "")
+                content = r.get("content", "")
+                title = r.get("title", "")
+                if not content and not title:
+                    continue
+                sname, scolor = source_info(url)
+                return {
+                    "player_name": name,
+                    "player_id": player["id"],
+                    "title": title or f"{name} — 2026 Outlook",
+                    "intro": content[:160].rstrip() + "…" if content else "",
+                    "url": url,
+                    "source": sname,
+                    "source_color": scolor,
+                }
+            except Exception:
+                continue
+        return None
+
+    skill = {"QB", "RB", "WR", "TE"}
+    starters = [p for p in d["starters"] if p["position"] in skill]
+    featured_players = starters[:3]
+    more_players = starters[3:]
+
+    featured = [a for p in featured_players if (a := search_player(p))]
+    more = [a for p in more_players if (a := search_player(p))]
+
+    content = {"featured": featured, "more": more}
+    CACHE_DIR.mkdir(exist_ok=True)
+    TEAM_NEWS_CACHE.write_text(json.dumps({
+        "cache_key": ck,
+        "content": content,
+    }))
+    return content
+
+
+@app.get("/team/trending")
+def get_team_trending():
+    """
+    Top trending adds from Sleeper (last 5 days, limit 10).
+    Each player is flagged 'waiver_add' (free agent) or 'trade' (rostered).
+    """
+    from src.tools.sleeper_tools import _get, _get_all_players
+    from src.config import SLEEPER_LEAGUE_ID
+
+    # Trending adds from Sleeper — 5 days lookback, top 10
+    trending_raw = _get(
+        "/players/nfl/trending/add?lookback_hours=120&limit=10"
+    )
+
+    # All league-owned players
+    all_rosters = _get(f"/league/{SLEEPER_LEAGUE_ID}/rosters")
+    users_list = _get(f"/league/{SLEEPER_LEAGUE_ID}/users")
+    user_map = {u["user_id"]: u for u in users_list}
+
+    pid_to_team: dict[str, str] = {}
+    for roster in all_rosters:
+        owner_id = roster.get("owner_id", "")
+        u = user_map.get(owner_id, {})
+        team_name = (
+            u.get("metadata", {}).get("team_name")
+            or u.get("display_name", "Unknown")
+        )
+        for pid in (roster.get("players") or []):
+            pid_to_team[str(pid)] = team_name
+
+    players_db = _get_all_players()
+
+    results = []
+    for entry in trending_raw:
+        pid = str(entry.get("player_id", ""))
+        p = players_db.get(pid, {})
+        if not p:
+            continue
+        first = p.get("first_name", "")
+        last = p.get("last_name", "")
+        name = f"{first} {last}".strip()
+        if not name:
+            continue
+        owned_by = pid_to_team.get(pid)
+        results.append({
+            "id": pid,
+            "name": name,
+            "position": p.get("position", "?"),
+            "team": p.get("team") or "FA",
+            "add_count": entry.get("count", 0),
+            "flag": "trade" if owned_by else "waiver_add",
+            "owned_by": owned_by,
+        })
+
+    return {"players": results}
+
+
+@app.get("/team/player-preview/{player_id}")
+def get_player_preview(player_id: str):
+    """Cached weekly player deep-dive preview."""
+    d = _my_roster_data()
+    week = d["week"]
+    season = d["season"]
+    season_type = d["season_type"]
+
+    suffix = f"week{week}" if season_type == "regular" else "off"
+    PLAYER_PREVIEW_DIR.mkdir(parents=True, exist_ok=True)
+    cache_file = PLAYER_PREVIEW_DIR / f"{player_id}_{season}_{suffix}.json"
+
+    if cache_file.exists():
+        try:
+            return json.loads(cache_file.read_text())
+        except Exception:
+            pass
+
+    # Find the player in our roster
+    all_players = d["starters"] + d["bench"]
+    player = next((p for p in all_players if p["id"] == player_id), None)
+    if not player:
+        raise HTTPException(status_code=404, detail="Player not on roster")
+
+    # Find opponent for regular season
+    opponent = ""
+    if season_type == "regular":
+        try:
+            from src.tools.sleeper_tools import _get
+            from src.config import SLEEPER_LEAGUE_ID, SLEEPER_USERNAME
+            user_data = _get(f"/user/{SLEEPER_USERNAME}")
+            rosters = _get(f"/league/{SLEEPER_LEAGUE_ID}/rosters")
+            users_list = _get(f"/league/{SLEEPER_LEAGUE_ID}/users")
+            user_map = {u["user_id"]: u for u in users_list}
+            my_roster = next(
+                (r for r in rosters
+                 if r["owner_id"] == user_data["user_id"]),
+                {},
+            )
+            my_roster_id = my_roster.get("roster_id")
+            matchup_data = _get(
+                f"/league/{SLEEPER_LEAGUE_ID}/matchups/{week}"
+            )
+            my_m = next(
+                (m for m in matchup_data
+                 if m["roster_id"] == my_roster_id),
+                None,
+            )
+            if my_m:
+                mid = my_m["matchup_id"]
+                opp_m = next(
+                    (m for m in matchup_data
+                     if m["matchup_id"] == mid
+                     and m["roster_id"] != my_roster_id),
+                    None,
+                )
+                if opp_m:
+                    opp_r = next(
+                        (r for r in rosters
+                         if r["roster_id"] == opp_m["roster_id"]),
+                        {},
+                    )
+                    opp_u = user_map.get(opp_r.get("owner_id", ""), {})
+                    opponent = (
+                        opp_u.get("metadata", {}).get("team_name")
+                        or opp_u.get("display_name", "")
+                    )
+        except Exception:
+            pass
+
+    result = generate_player_preview(
+        player=player,
+        my_team=d["team_name"],
+        opponent=opponent,
+        season_type=season_type,
+        week=week,
+        season=season,
+    )
+    cache_file.write_text(json.dumps(result))
+    return result
 
 
 @app.get("/thread/{thread_id}/history")

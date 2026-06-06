@@ -3,10 +3,28 @@
 import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 
+const NEON = {
+  base: {
+    background: "transparent",
+    color: "#22c55e",
+    border: "1px solid #22c55e",
+    boxShadow: "0 0 6px #22c55e55, 0 0 14px #22c55e22, inset 0 0 6px #22c55e11",
+    textShadow: "0 0 8px #22c55eaa",
+  },
+  hover: {
+    background: "#22c55e0d",
+    color: "#22c55e",
+    border: "1px solid #22c55e",
+    boxShadow: "0 0 10px #22c55e88, 0 0 24px #22c55e44, 0 0 40px #22c55e22, inset 0 0 8px #22c55e22",
+    textShadow: "0 0 12px #22c55e",
+  },
+};
+
 export default function QuickAsk() {
   const pathname = usePathname();
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  const [hovered, setHovered] = useState(false);
   const [input, setInput] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -17,7 +35,10 @@ export default function QuickAsk() {
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+      if (
+        containerRef.current &&
+        !containerRef.current.contains(e.target as Node)
+      ) {
         setOpen(false);
       }
     }
@@ -36,24 +57,28 @@ export default function QuickAsk() {
   }
 
   return (
-    <div ref={containerRef} style={{ position: "fixed", top: "14px", right: "20px", zIndex: 50 }}>
+    <div ref={containerRef}
+      style={{ position: "fixed", top: "20px", right: "20px", zIndex: 50 }}>
       <button
         onClick={() => setOpen(o => !o)}
-        className="flex items-center px-3 py-2 rounded-xl text-sm font-medium transition-colors cursor-pointer"
-        style={{ background: "var(--accent)", color: "#fff" }}>
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        className="flex items-center px-3 py-2 rounded-xl text-sm font-medium
+          transition-all duration-200 cursor-pointer active:scale-95"
+        style={hovered ? NEON.hover : NEON.base}>
         Ask AI GM
       </button>
 
       {open && (
-        <div
-          className="absolute right-0 mt-2 rounded-xl border shadow-xl"
+        <div className="absolute right-0 mt-2 rounded-xl border shadow-xl"
           style={{
             background: "var(--surface)",
             borderColor: "var(--border)",
             width: "300px",
           }}>
           <div className="px-4 pt-4 pb-2">
-            <p className="text-xs mb-2.5 font-medium" style={{ color: "var(--muted)" }}>
+            <p className="text-xs mb-2.5 font-medium"
+              style={{ color: "var(--muted)" }}>
               Ask your AI GM anything
             </p>
             <input
@@ -62,7 +87,8 @@ export default function QuickAsk() {
               onChange={e => setInput(e.target.value)}
               onKeyDown={e => e.key === "Enter" && submit()}
               placeholder="Who should I start this week?"
-              className="w-full px-3 py-2 rounded-lg text-sm outline-none border transition-colors"
+              className="w-full px-3 py-2 rounded-lg text-sm outline-none
+                border transition-colors"
               style={{
                 background: "var(--background)",
                 borderColor: "var(--border)",
@@ -74,7 +100,9 @@ export default function QuickAsk() {
             <button
               onClick={submit}
               disabled={!input.trim()}
-              className="px-4 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-40 cursor-pointer"
+              className="px-4 py-1.5 rounded-lg text-xs font-medium
+                transition-all disabled:opacity-40 cursor-pointer
+                hover:opacity-90 active:scale-95"
               style={{ background: "var(--accent)", color: "#fff" }}>
               Send →
             </button>
