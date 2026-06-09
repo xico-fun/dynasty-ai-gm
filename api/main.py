@@ -12,6 +12,10 @@ from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.memory import MemorySaver
 from pydantic import BaseModel
 
+from api.db import (
+    init_db, save_exchange, get_messages, list_threads,
+    set_thread_meta, delete_thread,
+)
 from src.agents.matchup_preview_agent import generate_matchup_preview
 from src.agents.matchup_spotlight_agent import (
     generate_spotlight,
@@ -27,6 +31,10 @@ SPOTLIGHT_CACHE = CACHE_DIR / "matchup_spotlight.json"
 TEAM_NEWS_CACHE = CACHE_DIR / "team_news.json"
 TEAM_WAIVER_CACHE = CACHE_DIR / "team_waiver_adds.json"
 PLAYER_PREVIEW_DIR = CACHE_DIR / "player_previews"
+TRADE_TRENDING_CACHE = CACHE_DIR / "trade_trending.json"
+TRADE_RECS_CACHE = CACHE_DIR / "trade_recs.json"
+START_SIT_CACHE = CACHE_DIR / "matchup_startsit.json"
+INJURIES_CACHE = CACHE_DIR / "matchup_injuries.json"
 
 app = FastAPI(title="Dynasty AI GM API")
 
@@ -37,6 +45,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+init_db()
 
 # Single shared graph instance with in-memory checkpointing
 _graph = _build_graph(checkpointer=MemorySaver())
@@ -136,6 +146,65 @@ async def chat_stream(req: ChatRequest):
         media_type="text/event-stream",
         headers={"X-Thread-Id": thread_id},
     )
+
+
+def _calc_streaks(
+    my_rid: int,
+    opp_rid: int,
+    current_week: int,
+    league_id: str,
+) -> tuple[str | None, str | None]:
+    """Return (my_streak, opp_streak) e.g. ('W3', 'L1') from recent results."""
+    from src.tools.sleeper_tools import _get
+    my_res: list[bool] = []
+    opp_res: list[bool] = []
+    for w in range(current_week - 1, max(0, current_week - 6), -1):
+        try:
+            ms = _get(f"/league/{league_id}/matchups/{w}")
+            # My streak
+            my_m = next((m for m in ms if m["roster_id"] == my_rid), None)
+            if my_m:
+                mid = my_m["matchup_id"]
+                rival = next(
+                    (m for m in ms
+                     if m["matchup_id"] == mid and m["roster_id"] != my_rid),
+                    None,
+                )
+                if rival:
+                    mp = my_m.get("points") or 0
+                    rp = rival.get("points") or 0
+                    if mp > 0 or rp > 0:
+                        my_res.append(mp > rp)
+            # Opp streak
+            opp_m = next((m for m in ms if m["roster_id"] == opp_rid), None)
+            if opp_m:
+                mid = opp_m["matchup_id"]
+                rival2 = next(
+                    (m for m in ms
+                     if m["matchup_id"] == mid and m["roster_id"] != opp_rid),
+                    None,
+                )
+                if rival2:
+                    op = opp_m.get("points") or 0
+                    rp2 = rival2.get("points") or 0
+                    if op > 0 or rp2 > 0:
+                        opp_res.append(op > rp2)
+        except Exception:
+            break
+
+    def _streak(results: list[bool]) -> str | None:
+        if not results:
+            return None
+        cur = results[0]
+        count = 1
+        for r in results[1:]:
+            if r == cur:
+                count += 1
+            else:
+                break
+        return f"{'W' if cur else 'L'}{count}"
+
+    return _streak(my_res), _streak(opp_res)
 
 
 @app.get("/dashboard")
@@ -245,17 +314,44 @@ def get_dashboard():
                         "|".join(sorted(my_ids) + sorted(opp_ids)).encode()
                     ).hexdigest()[:10]
 
+                    opp_s = opp_roster.get("settings", {})
+                    my_streak, opp_streak = None, None
+                    if season_type == "regular" and week > 1:
+                        try:
+                            my_streak, opp_streak = _calc_streaks(
+                                my_roster_id,
+                                opp_m["roster_id"],
+                                week,
+                                SLEEPER_LEAGUE_ID,
+                            )
+                        except Exception:
+                            pass
+
                     matchup = {
                         "week": week,
                         "my_team": team_name,
+                        "my_record": (
+                            f"{my_settings.get('wins', 0)}"
+                            f"-{my_settings.get('losses', 0)}"
+                        ),
+                        "my_streak": my_streak,
                         "my_points": my_m.get("points", 0),
-                        "my_starters": [_player_obj(pid) for pid in my_ids],
+                        "my_starters": [
+                            _player_obj(pid) for pid in my_ids
+                        ],
                         "opp_team": (
                             opp_user.get("metadata", {}).get("team_name")
                             or opp_user.get("display_name", "Opponent")
                         ),
+                        "opp_record": (
+                            f"{opp_s.get('wins', 0)}"
+                            f"-{opp_s.get('losses', 0)}"
+                        ),
+                        "opp_streak": opp_streak,
                         "opp_points": opp_m.get("points", 0),
-                        "opp_starters": [_player_obj(pid) for pid in opp_ids],
+                        "opp_starters": [
+                            _player_obj(pid) for pid in opp_ids
+                        ],
                         "starters_hash": starters_hash,
                     }
         except Exception:
@@ -634,6 +730,170 @@ def get_matchup_spotlight():
     return {"spotlight": content}
 
 
+@app.get("/matchup-startsit")
+def get_matchup_startsit():
+    """3 start/sit decisions for the current matchup. Cached weekly."""
+    from src.agents.start_sit_agent import generate_start_sit
+
+    d = _my_roster_data() if False else None  # resolved below
+    from src.tools.sleeper_tools import _get, _get_all_players
+    from src.config import SLEEPER_USERNAME, SLEEPER_LEAGUE_ID
+
+    nfl_state = _get("/state/nfl")
+    week = nfl_state.get("week") or 1
+    season = nfl_state.get("season", "2026")
+    season_type = nfl_state.get("season_type", "off")
+    ck = f"{season}_week{week}_ss"
+
+    if START_SIT_CACHE.exists():
+        try:
+            cached = json.loads(START_SIT_CACHE.read_text())
+            if cached.get("cache_key") == ck:
+                return cached["content"]
+        except Exception:
+            pass
+
+    if season_type != "regular":
+        content = {"decisions": [], "offseason": True}
+        CACHE_DIR.mkdir(exist_ok=True)
+        START_SIT_CACHE.write_text(
+            json.dumps({"cache_key": ck, "content": content})
+        )
+        return content
+
+    user = _get(f"/user/{SLEEPER_USERNAME}")
+    user_id = user["user_id"]
+    rosters = _get(f"/league/{SLEEPER_LEAGUE_ID}/rosters")
+    users_list = _get(f"/league/{SLEEPER_LEAGUE_ID}/users")
+    user_map = {u["user_id"]: u for u in users_list}
+    my_roster = next(
+        (r for r in rosters if r["owner_id"] == user_id), {}
+    )
+    my_roster_id = my_roster.get("roster_id")
+    my_meta = user_map.get(user_id, {})
+    team_name = (
+        my_meta.get("metadata", {}).get("team_name")
+        or my_meta.get("display_name", "My Team")
+    )
+    players_db = _get_all_players()
+
+    def _obj(pid):
+        p = players_db.get(str(pid), {})
+        return {
+            "id": str(pid),
+            "name": (
+                f"{p.get('first_name', '')} {p.get('last_name', '')}".strip()
+                or f"Unknown ({pid})"
+            ),
+            "position": p.get("position", "?"),
+            "team": p.get("team") or "FA",
+        }
+
+    starter_ids = my_roster.get("starters") or []
+    all_ids = my_roster.get("players") or []
+    bench_ids = [p for p in all_ids if p not in starter_ids]
+    starters = [_obj(pid) for pid in starter_ids]
+    bench = [_obj(pid) for pid in bench_ids[:10]]
+
+    opp_name = ""
+    try:
+        matchup_data = _get(
+            f"/league/{SLEEPER_LEAGUE_ID}/matchups/{week}"
+        )
+        my_m = next(
+            (m for m in matchup_data if m["roster_id"] == my_roster_id),
+            None,
+        )
+        if my_m:
+            mid = my_m["matchup_id"]
+            opp_m = next(
+                (m for m in matchup_data
+                 if m["matchup_id"] == mid
+                 and m["roster_id"] != my_roster_id),
+                None,
+            )
+            if opp_m:
+                opp_r = next(
+                    (r for r in rosters
+                     if r["roster_id"] == opp_m["roster_id"]),
+                    {},
+                )
+                opp_u = user_map.get(opp_r.get("owner_id", ""), {})
+                opp_name = (
+                    opp_u.get("metadata", {}).get("team_name")
+                    or opp_u.get("display_name", "")
+                )
+    except Exception:
+        pass
+
+    decisions = generate_start_sit(
+        my_team=team_name,
+        starters=starters,
+        bench=bench,
+        week=week,
+        opp_team=opp_name,
+        season_type=season_type,
+    )
+
+    content = {"decisions": decisions, "offseason": False}
+    CACHE_DIR.mkdir(exist_ok=True)
+    START_SIT_CACHE.write_text(
+        json.dumps({"cache_key": ck, "content": content})
+    )
+    return content
+
+
+@app.get("/matchup-injuries")
+def get_matchup_injuries():
+    """Injury & news snapshot for my key starters. Cached daily."""
+    from src.tools.search_tools import search_player_news
+
+    d = _my_roster_data()
+    week = d["week"]
+    season = d["season"]
+    season_type = d["season_type"]
+    ck = f"{season}_week{week}_inj"
+
+    if INJURIES_CACHE.exists():
+        try:
+            cached = json.loads(INJURIES_CACHE.read_text())
+            if cached.get("cache_key") == ck:
+                return cached["content"]
+        except Exception:
+            pass
+
+    skill = {"QB", "RB", "WR", "TE"}
+    starters = [p for p in d["starters"] if p["position"] in skill][:6]
+
+    results = []
+    for p in starters:
+        try:
+            raw = search_player_news.invoke({"player_name": p["name"]})
+            if isinstance(raw, dict):
+                raw = raw.get("results", [])
+            snippet = raw[0].get("content", "").strip()[:220] if raw else ""
+            results.append({
+                "player_name": p["name"],
+                "position": p["position"],
+                "team": p["team"],
+                "snippet": snippet or "No recent news found.",
+            })
+        except Exception:
+            results.append({
+                "player_name": p["name"],
+                "position": p["position"],
+                "team": p["team"],
+                "snippet": "No recent news found.",
+            })
+
+    content = {"players": results}
+    CACHE_DIR.mkdir(exist_ok=True)
+    INJURIES_CACHE.write_text(
+        json.dumps({"cache_key": ck, "content": content})
+    )
+    return content
+
+
 def _my_roster_data():
     """Shared helper — returns nfl_state + my full structured roster."""
     from src.tools.sleeper_tools import _get, _get_all_players
@@ -699,7 +959,12 @@ def get_team_roster():
         "team_name": d["team_name"],
         "record": d["record"],
         "season": d["season"],
-        "phase": d["nfl_state"].get("season_type", "off"),
+        "phase": {
+            "pre": "Preseason",
+            "regular": f"Week {d['week']}",
+            "post": "Playoffs",
+            "off": "Offseason",
+        }.get(d["nfl_state"].get("season_type", "off"), "Offseason"),
         "week": d["week"],
         "starters": d["starters"],
         "bench": d["bench"],
@@ -945,23 +1210,303 @@ def get_player_preview(player_id: str):
     return result
 
 
+class TradeFindRequest(BaseModel):
+    player_ids: list[str] = []
+    pick_ids: list[str] = []
+
+
+@app.get("/trades/roster")
+def get_trades_roster():
+    """My roster by position + tradeable picks for the Trade Center."""
+    from src.tools.sleeper_tools import _get
+    from src.config import SLEEPER_USERNAME, SLEEPER_LEAGUE_ID
+
+    d = _my_roster_data()
+    all_players = d["starters"] + d["bench"]
+
+    positions: dict[str, list] = {"QB": [], "RB": [], "WR": [], "TE": []}
+    for p in all_players:
+        if p["position"] in positions:
+            positions[p["position"]].append(p)
+    for pos in positions:
+        positions[pos].sort(key=lambda x: x["name"])
+
+    picks: list[dict] = []
+    try:
+        user = _get(f"/user/{SLEEPER_USERNAME}")
+        user_id = user["user_id"]
+        rosters = _get(f"/league/{SLEEPER_LEAGUE_ID}/rosters")
+        my_roster = next((r for r in rosters if r["owner_id"] == user_id), {})
+        my_roster_id = my_roster.get("roster_id")
+
+        users_list = _get(f"/league/{SLEEPER_LEAGUE_ID}/users")
+        user_map = {u["user_id"]: u for u in users_list}
+        roster_to_uid = {r["roster_id"]: r.get("owner_id") for r in rosters}
+
+        traded_raw = _get(f"/league/{SLEEPER_LEAGUE_ID}/traded_picks")
+        current_season = int(d["nfl_state"].get("season", "2026"))
+        future_seasons = [str(current_season + i) for i in range(1, 4)]
+        round_labels = {1: "1st", 2: "2nd", 3: "3rd"}
+
+        traded_away: set[tuple] = set()
+        for tp in (traded_raw or []):
+            season = tp.get("season", "")
+            if season not in future_seasons:
+                continue
+            rnd = tp.get("round")
+            orig = tp.get("roster_id")
+            cur = tp.get("owner_id")
+            if orig == my_roster_id and cur != my_roster_id:
+                traded_away.add((season, rnd))
+            elif cur == my_roster_id and orig != my_roster_id:
+                uid = roster_to_uid.get(orig, "")
+                u = user_map.get(uid, {})
+                orig_team = (
+                    u.get("metadata", {}).get("team_name")
+                    or u.get("display_name", "Unknown")
+                )
+                picks.append({
+                    "id": f"pick_{season}_rd{rnd}_from_{orig}",
+                    "label": f"{season} {round_labels.get(rnd, f'Rd {rnd}')}",
+                    "season": season,
+                    "round": rnd,
+                    "original_team": orig_team,
+                    "is_own": False,
+                })
+
+        for season in future_seasons:
+            for rnd in [1, 2, 3]:
+                if (season, rnd) not in traded_away:
+                    picks.append({
+                        "id": f"pick_{season}_rd{rnd}_own",
+                        "label": f"{season} {round_labels[rnd]}",
+                        "season": season,
+                        "round": rnd,
+                        "original_team": d["team_name"],
+                        "is_own": True,
+                    })
+
+        picks.sort(key=lambda x: (x["season"], x["round"], not x["is_own"]))
+    except Exception:
+        pass
+
+    return {
+        "team_name": d["team_name"],
+        "record": d["record"],
+        "season": d["season"],
+        "phase": {
+            "pre": "Preseason",
+            "regular": f"Week {d['week']}",
+            "post": "Playoffs",
+            "off": "Offseason",
+        }.get(d["nfl_state"].get("season_type", "off"), "Offseason"),
+        "positions": positions,
+        "picks": picks,
+    }
+
+
+@app.post("/trades/find")
+def find_trades(req: TradeFindRequest):
+    """AI trade finder — given offered players/picks, return 3 proposals."""
+    from src.tools.sleeper_tools import _get, _get_all_players
+    from src.config import SLEEPER_LEAGUE_ID
+    from src.agents.trade_finder_agent import generate_trade_proposals
+
+    if not req.player_ids and not req.pick_ids:
+        raise HTTPException(
+            status_code=400, detail="No players or picks provided"
+        )
+
+    d = _my_roster_data()
+    all_my = d["starters"] + d["bench"]
+    offered_players = [p for p in all_my if p["id"] in req.player_ids]
+
+    round_labels = {"1": "1st", "2": "2nd", "3": "3rd"}
+    offered_picks = []
+    for pick_id in req.pick_ids:
+        parts = pick_id.split("_")
+        if len(parts) >= 3:
+            season = parts[1]
+            rnd = parts[2].replace("rd", "")
+            offered_picks.append(
+                f"{season} {round_labels.get(rnd, rnd + 'th')} Round Pick"
+            )
+
+    rosters = _get(f"/league/{SLEEPER_LEAGUE_ID}/rosters")
+    users_list = _get(f"/league/{SLEEPER_LEAGUE_ID}/users")
+    players_db = _get_all_players()
+    user_map = {u["user_id"]: u for u in users_list}
+
+    def _obj(pid):
+        p = players_db.get(str(pid), {})
+        first = p.get("first_name", "")
+        last = p.get("last_name", "")
+        return {
+            "name": f"{first} {last}".strip() or f"Unknown ({pid})",
+            "position": p.get("position", "?"),
+            "team": p.get("team") or "FA",
+        }
+
+    league_rosters = []
+    for r in rosters:
+        uid = r.get("owner_id", "")
+        u = user_map.get(uid, {})
+        team_name = (
+            u.get("metadata", {}).get("team_name")
+            or u.get("display_name", "Unknown")
+        )
+        starters = [_obj(pid) for pid in (r.get("starters") or []) if pid][:8]
+        league_rosters.append({"team_name": team_name, "players": starters})
+
+    return generate_trade_proposals(
+        offered_players=offered_players,
+        offered_picks=offered_picks,
+        my_team=d["team_name"],
+        my_starters=d["starters"],
+        my_bench=d["bench"],
+        league_rosters=league_rosters,
+    )
+
+
+@app.get("/trades/trending-values")
+def get_trades_trending_values():
+    """Trade market values for my key starters. Cached weekly."""
+    from src.tools.search_tools import search_dynasty_analysis
+    from src.agents.trade_finder_agent import generate_player_value_summaries
+
+    d = _my_roster_data()
+    week = d["week"]
+    season = d["season"]
+    season_type = d["season_type"]
+    ck = (
+        f"{season}_week{week}_tv"
+        if season_type == "regular"
+        else f"{season}_off_tv"
+    )
+
+    if TRADE_TRENDING_CACHE.exists():
+        try:
+            cached = json.loads(TRADE_TRENDING_CACHE.read_text())
+            if cached.get("cache_key") == ck:
+                return cached["content"]
+        except Exception:
+            pass
+
+    skill = {"QB", "RB", "WR", "TE"}
+    players = [p for p in d["starters"] if p["position"] in skill][:6]
+
+    # Fetch dynasty analysis snippets (DynastyNerds, DLF, FantasyPoints — actual text)
+    snippets: dict[str, str] = {}
+    for p in players:
+        try:
+            raw = search_dynasty_analysis.invoke(
+                {"query": f"{p['name']} dynasty trade value buy sell hold"}
+            )
+            if isinstance(raw, dict):
+                raw = raw.get("results", [])
+            snippets[p["id"]] = (
+                raw[0].get("content", "").strip() if raw else ""
+            )
+        except Exception:
+            snippets[p["id"]] = ""
+
+    # Summarize to "Typically goes for: X" via Claude
+    summaries = generate_player_value_summaries(players, snippets)
+
+    results = [
+        {
+            "id": p["id"], "name": p["name"],
+            "position": p["position"], "team": p["team"],
+            "value_notes": summaries.get(
+                p["id"], "Value unclear — check KTC"
+            ),
+        }
+        for p in players
+    ]
+
+    content = {"players": results}
+    CACHE_DIR.mkdir(exist_ok=True)
+    TRADE_TRENDING_CACHE.write_text(
+        json.dumps({"cache_key": ck, "content": content})
+    )
+    return content
+
+
+@app.get("/trades/recommendations")
+def get_trades_recommendations():
+    """3 AI trade recommendations for my roster. Cached weekly."""
+    from src.agents.trade_finder_agent import generate_trade_recommendations
+
+    d = _my_roster_data()
+    week = d["week"]
+    season = d["season"]
+    season_type = d["season_type"]
+    ck = (
+        f"{season}_week{week}_recs"
+        if season_type == "regular"
+        else f"{season}_off_recs"
+    )
+
+    if TRADE_RECS_CACHE.exists():
+        try:
+            cached = json.loads(TRADE_RECS_CACHE.read_text())
+            if cached.get("cache_key") == ck:
+                return cached["content"]
+        except Exception:
+            pass
+
+    content = generate_trade_recommendations(
+        my_team=d["team_name"],
+        my_starters=d["starters"],
+        my_bench=d["bench"],
+        record=d["record"],
+    )
+    CACHE_DIR.mkdir(exist_ok=True)
+    TRADE_RECS_CACHE.write_text(json.dumps({"cache_key": ck, "content": content}))
+    return content
+
+
+class SaveRequest(BaseModel):
+    user_message: str
+    assistant_message: str
+
+
+@app.post("/thread/{thread_id}/save")
+def save_thread_exchange(thread_id: str, req: SaveRequest):
+    """Persist a user/assistant exchange to SQLite after streaming."""
+    save_exchange(thread_id, req.user_message, req.assistant_message)
+    return {"ok": True}
+
+
+@app.get("/threads")
+def get_threads():
+    """List recent threads for the history panel."""
+    return {"threads": list_threads(limit=30)}
+
+
+class ThreadPatchRequest(BaseModel):
+    starred: bool
+    custom_title: str | None = None
+
+
+@app.patch("/thread/{thread_id}")
+def patch_thread(thread_id: str, req: ThreadPatchRequest):
+    """Update starred / custom title for a thread."""
+    set_thread_meta(thread_id, req.starred, req.custom_title)
+    return {"ok": True}
+
+
+@app.delete("/thread/{thread_id}")
+def delete_thread_endpoint(thread_id: str):
+    """Delete all messages and metadata for a thread."""
+    delete_thread(thread_id)
+    return {"ok": True}
+
+
 @app.get("/thread/{thread_id}/history")
 def get_thread_history(thread_id: str):
-    """Return the message history for a given thread."""
-    config = {"configurable": {"thread_id": thread_id}}
-    state = _graph.get_state(config)
-    if not state or not state.values:
-        return {"thread_id": thread_id, "messages": []}
-
-    messages = []
-    for msg in state.values.get("messages", []):
-        role = "user" if isinstance(msg, HumanMessage) else "assistant"
-        content = msg.content
-        if isinstance(content, list):
-            content = "".join(
-                b.get("text", "") for b in content if isinstance(b, dict)
-            )
-        if content:
-            messages.append({"role": role, "content": content})
-
-    return {"thread_id": thread_id, "messages": messages}
+    """Return persisted message history for a thread."""
+    return {
+        "thread_id": thread_id,
+        "messages": get_messages(thread_id),
+    }

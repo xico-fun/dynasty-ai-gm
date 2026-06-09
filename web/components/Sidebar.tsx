@@ -7,7 +7,6 @@ import {
   LayoutDashboard,
   Users,
   MessageSquare,
-  ListChecks,
   ArrowLeftRight,
   ChevronLeft,
   ChevronRight,
@@ -16,9 +15,8 @@ import {
 const NAV = [
   { href: "/",       label: "Dashboard",    icon: LayoutDashboard },
   { href: "/team",   label: "My Team",      icon: Users },
-  { href: "/chat",   label: "AI GM Chat",   icon: MessageSquare },
-  { href: "/waiver", label: "Waiver Wire",  icon: ListChecks },
   { href: "/trades", label: "Trade Center", icon: ArrowLeftRight },
+  { href: "/chat",   label: "AI GM Chat",   icon: MessageSquare },
 ];
 
 export default function Sidebar() {

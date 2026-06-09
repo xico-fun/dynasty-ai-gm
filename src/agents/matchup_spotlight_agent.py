@@ -51,17 +51,21 @@ Schema:
       "projected_stats": "{proj_hint}",
       "vegas": "{vegas_hint}",
       "matchup_history": {history_note},
-      "note": "One sentence — why selected and what to watch."
+      "note": "One sentence max 100 chars — why selected and what to watch."
     }}
   ]
 }}
 
 Rules:
-- Bold player names: **Name**
+- Do NOT use markdown — plain text only, no ** or other formatting
 - 3 key players first, watch player last
 - projected_stats and vegas MUST contain real numbers from research
-- vegas MUST be player prop lines (e.g. 'o/u 1.5 TDs -120'), never \
-team win totals or Super Bowl odds
+- Abbreviate: pass yards → pyds, rush yards → ryds, rec yards → ryds,
+  pass TDs → PTDs, rush TDs → RTDs, receiving TDs → TDs
+- Do NOT mention any source names (FantasyPros, DLF, etc.) in stats
+- Omit standard juice (-110, -115) from vegas lines
+- vegas MUST be player prop lines (e.g. 'o/u 1.5 TDs, o/u 72.5 ryds'),
+  never team win totals or Super Bowl odds
 - note must be specific — no generic filler
 - Only include players from {my_team}'s roster\
 """
@@ -104,16 +108,14 @@ def generate_spotlight(matchup: dict, season_type: str) -> dict:
 
     # Schema hints vary by mode
     proj_hint = (
-        "Concrete season totals, e.g. '4,200 pass yds, 32 TDs (FantasyPros)'"
+        "Concrete season totals, e.g. '4,200 pyds, 32 PTDs, 450 ryds'"
         if not is_regular
-        else "Weekly projection, e.g. '285 pass yds, 2 TDs (FantasyPros)'"
+        else "Weekly projection, e.g. '285 pyds, 2 PTDs'"
     )
     vegas_hint = (
-        "Season player props, e.g. 'o/u 4,200 pass yds -115, "
-        "o/u 28.5 TDs -110' — player props only, not team odds"
+        "Season player props, e.g. 'o/u 4,200 pyds, o/u 28.5 PTDs' — player props only, not team odds"
         if not is_regular
-        else "Weekly player props, e.g. 'o/u 1.5 TDs -120, "
-        "o/u 72.5 rec yds -115' — player props only"
+        else "Weekly player props, e.g. 'o/u 1.5 TDs, o/u 72.5 ryds' — player props only"
     )
     history_note = (
         "null"

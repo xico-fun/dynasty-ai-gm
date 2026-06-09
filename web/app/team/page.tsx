@@ -3,6 +3,15 @@
 import { useEffect, useState } from "react";
 import { ChevronDown, ChevronUp, Zap, Eye, ExternalLink } from "lucide-react";
 
+function renderBold(text: string) {
+  const cleaned = text.replace(/^#{1,6}\s*/gm, "").trim();
+  return cleaned.split(/\*\*(.*?)\*\*/g).map((part, i) =>
+    i % 2 === 1
+      ? <strong key={i} style={{ fontWeight: 600 }}>{part}</strong>
+      : part
+  );
+}
+
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -292,9 +301,9 @@ function PlayerRow({ player, expanded, loading, preview, onToggle }: {
               ))}
               {/* Summary */}
               {preview.summary && (
-                <p className="text-xs leading-relaxed italic pt-1 border-t"
+                <p className="text-xs leading-relaxed pt-1 border-t"
                   style={{ color: "var(--foreground)", borderColor: "var(--border)" }}>
-                  {preview.summary}
+                  {renderBold(preview.summary)}
                 </p>
               )}
             </div>
