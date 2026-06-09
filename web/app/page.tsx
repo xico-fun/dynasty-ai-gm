@@ -87,23 +87,32 @@ function renderBold(text: string) {
   );
 }
 
+// ── Session cache ─────────────────────────────────────────────────────────────
+
+const _dc: {
+  data: DashboardData | null; preview: PreviewState; spotlight: SpotlightState; ts: number;
+} = { data: null, preview: { status: "idle" }, spotlight: { status: "idle" }, ts: 0 };
+const DASH_TTL = 5 * 60 * 1000;
+const dashOk = () => _dc.ts > 0 && Date.now() - _dc.ts < DASH_TTL;
+
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 
 export default function Dashboard() {
-  const [data, setData] = useState<DashboardData | null>(null);
+  const [data, setData] = useState<DashboardData | null>(_dc.data);
   const [error, setError] = useState(false);
-  const [preview, setPreview] = useState<PreviewState>({ status: "idle" });
-  const [spotlight, setSpotlight] = useState<SpotlightState>({ status: "idle" });
+  const [preview, setPreview] = useState<PreviewState>(_dc.preview);
+  const [spotlight, setSpotlight] = useState<SpotlightState>(_dc.spotlight);
   const [startSit, setStartSit] = useState<StartSitState>({ status: "idle" });
   const [injuries, setInjuries] = useState<InjuryState>({ status: "idle" });
   const [regenerating, setRegenerating] = useState(false);
   const [activeChip, setActiveChip] = useState<Chip>("preview");
 
   useEffect(() => {
+    if (dashOk()) return;
     fetch(`${API}/dashboard`)
       .then(r => { if (!r.ok) throw new Error(); return r.json(); })
       .then(d => {
-        setData(d);
+        setData(d); _dc.data = d; _dc.ts = Date.now();
         if (d.matchup) {
           fetchPreview();
           fetchSpotlight();
@@ -119,7 +128,8 @@ export default function Dashboard() {
       .then(r => r.json())
       .then(p => {
         if (p.preview?.prediction) {
-          setPreview({ status: "done", data: p.preview, lineupChanged: p.lineup_changed });
+          const next: PreviewState = { status: "done", data: p.preview, lineupChanged: p.lineup_changed };
+          setPreview(next); _dc.preview = next;
         } else {
           setPreview({ status: "idle" });
         }
@@ -134,7 +144,8 @@ export default function Dashboard() {
       .then(s => {
         const players = s.spotlight?.players;
         if (players?.length) {
-          setSpotlight({ status: "done", players });
+          const next: SpotlightState = { status: "done", players };
+          setSpotlight(next); _dc.spotlight = next;
         } else {
           setSpotlight({ status: "idle" });
         }
@@ -172,11 +183,13 @@ export default function Dashboard() {
 
   async function regeneratePreview() {
     setRegenerating(true);
+    _dc.preview = { status: "idle" }; _dc.ts = 0;
     try {
       const r = await fetch(`${API}/matchup-preview/regenerate`, { method: "POST" });
       const p = await r.json();
       if (p.preview?.prediction) {
-        setPreview({ status: "done", data: p.preview, lineupChanged: false });
+        const next: PreviewState = { status: "done", data: p.preview, lineupChanged: false };
+        setPreview(next); _dc.preview = next;
       }
     } finally {
       setRegenerating(false);

@@ -59,47 +59,50 @@ const RATING_COLOR: Record<string, string> = {
   Start: "#22c55e", Flex: "#f59e0b", Sit: "#ef4444",
 };
 
+// ── Session cache (survives navigation within the same tab) ──────────────────
+
+const _c: {
+  roster: RosterData | null; news: NewsData | null;
+  trending: TrendingPlayer[]; previews: Record<string, PlayerPreview>; ts: number;
+} = { roster: null, news: null, trending: [], previews: {}, ts: 0 };
+const CACHE_TTL = 5 * 60 * 1000;
+const cacheOk = () => _c.ts > 0 && Date.now() - _c.ts < CACHE_TTL;
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function TeamPage() {
-  const [roster, setRoster] = useState<RosterData | null>(null);
-  const [news, setNews] = useState<NewsData | null>(null);
-  const [trending, setTrending] = useState<TrendingPlayer[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [roster, setRoster] = useState<RosterData | null>(_c.roster);
+  const [news, setNews] = useState<NewsData | null>(_c.news);
+  const [trending, setTrending] = useState<TrendingPlayer[]>(_c.trending);
+  const [loading, setLoading] = useState(!cacheOk());
 
   // Preview state — inline accordion
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [loadingId, setLoadingId] = useState<string | null>(null);
-  const [previews, setPreviews] = useState<Record<string, PlayerPreview>>({});
+  const [previews, setPreviews] = useState<Record<string, PlayerPreview>>(_c.previews);
 
   useEffect(() => {
+    if (cacheOk()) return;
     fetch(`${API}/team/roster`)
       .then(r => r.json())
-      .then(d => { setRoster(d); setLoading(false); })
+      .then(d => { setRoster(d); setLoading(false); _c.roster = d; _c.ts = Date.now(); })
       .catch(() => setLoading(false));
-
-    fetch(`${API}/team/news`).then(r => r.json()).then(setNews).catch(() => {});
+    fetch(`${API}/team/news`).then(r => r.json()).then(d => { setNews(d); _c.news = d; }).catch(() => {});
     fetch(`${API}/team/trending`)
       .then(r => r.json())
-      .then(d => setTrending(d.players ?? []))
+      .then(d => { const p = d.players ?? []; setTrending(p); _c.trending = p; })
       .catch(() => {});
   }, []);
 
   function togglePreview(player: Player) {
-    // Collapse if already expanded
-    if (expandedId === player.id) {
-      setExpandedId(null);
-      return;
-    }
+    if (expandedId === player.id) { setExpandedId(null); return; }
     setExpandedId(player.id);
-    // Already fetched — just expand
     if (previews[player.id]) return;
-    // Fetch
     setLoadingId(player.id);
     fetch(`${API}/team/player-preview/${player.id}`)
       .then(r => r.json())
       .then(data => {
-        setPreviews(p => ({ ...p, [player.id]: data }));
+        setPreviews(p => { const n = { ...p, [player.id]: data }; _c.previews = n; return n; });
         setLoadingId(null);
       })
       .catch(() => setLoadingId(null));

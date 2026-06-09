@@ -24,5 +24,8 @@ def get_runtime_context() -> str:
         f"## Current Context\n"
         f"- Today: {date_str}\n"
         f"- NFL Phase: {now.year} {phase}\n"
-        f"- Use {now.year} in search queries unless looking for historical data.\n\n"
+        f"- Use {now.year} in search queries unless looking for historical data.\n"
+        f"- Dynasty draft note: the {now.year} dynasty rookie draft has already "
+        f"occurred. The earliest tradeable future picks are {now.year + 1} picks. "
+        f"Never reference {now.year} picks as available trade assets.\n\n"
     )

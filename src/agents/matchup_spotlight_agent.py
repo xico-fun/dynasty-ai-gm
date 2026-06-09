@@ -16,6 +16,7 @@ from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from src.config import ANTHROPIC_API_KEY
 from src.tools.search_tools import search_player_news
 from src.strategy import STRATEGY_PREFIX
+from src.runtime_context import get_runtime_context
 
 # ── System prompts ────────────────────────────────────────────────────────────
 
@@ -66,6 +67,9 @@ Rules:
 - Omit standard juice (-110, -115) from vegas lines
 - vegas MUST be player prop lines (e.g. 'o/u 1.5 TDs, o/u 72.5 ryds'),
   never team win totals or Super Bowl odds
+- Do NOT name coaches, coordinators, or offensive systems unless that
+  exact name appeared in your search results — never use training data
+  for personnel details, as coaches change frequently
 - note must be specific — no generic filler
 - Only include players from {my_team}'s roster\
 """
@@ -136,7 +140,7 @@ def generate_spotlight(matchup: dict, season_type: str) -> dict:
     messages: list = [
         SystemMessage(content=_RESEARCH_SYSTEM.format(period=period)),
         HumanMessage(content=(
-            f"{STRATEGY_PREFIX}\n\n{context}\n\n"
+            f"{get_runtime_context()}{STRATEGY_PREFIX}\n\n{context}\n\n"
             "Search the players you need prop/projection data on, "
             "then stop — a follow-up will ask you to write the spotlight."
         )),

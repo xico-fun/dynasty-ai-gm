@@ -13,14 +13,22 @@ from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 
 from src.config import ANTHROPIC_API_KEY
-from src.tools.search_tools import search_player_news
+from src.tools.search_tools import search_player_news, search_dynasty_analysis
 from src.strategy import STRATEGY_PREFIX
+from src.runtime_context import get_runtime_context
 
 _RESEARCH_SYSTEM = """\
 You are a dynasty fantasy football analyst researching {player_name} \
 ({position}, {team}) for the {my_team} owner.
 
-Use search_player_news to find:
+Tools available:
+- search_player_news — injury status, beat reporter updates, snap counts
+- search_dynasty_analysis — dynasty ADP, rankings, outlook, projections
+
+Use the right tool for each target below. For rookies or players with \
+limited NFL history, prefer search_dynasty_analysis over search_player_news.
+
+Targets:
 {research_targets}
 
 Be selective — 2-4 searches max. Stop when you have enough.\
@@ -43,7 +51,11 @@ o/u 72.5 rec yds -115'. Never team odds.",
   "summary": "2-3 sentences — start/sit reasoning, key upside or risk."
 }}
 
-Rules: bold player names **Name**, be specific, no fluff.\
+Rules: bold player names **Name**, be specific, no fluff.
+- This is dynasty fantasy football — players are owned or on waivers.
+  Never reference NFL free agency, contracts, or "letting someone overpay".
+- Do NOT name coaches, coordinators, or schemes unless confirmed in your
+  search results — never rely on training data for personnel details.\
 """
 
 _WRITE_SYSTEM_OFFSEASON = """\
@@ -62,7 +74,11 @@ e.g. 'o/u 4,150 pass yds -115, o/u 28.5 TDs -110'. Player props only.",
   "summary": "2-3 sentences — dynasty value, key upside, key risk."
 }}
 
-Rules: bold player names **Name**, be specific, no fluff.\
+Rules: bold player names **Name**, be specific, no fluff.
+- This is dynasty fantasy football — players are owned or on waivers.
+  Never reference NFL free agency, contracts, or "letting someone overpay".
+- Do NOT name coaches, coordinators, or schemes unless confirmed in your
+  search results — never rely on training data for personnel details.\
 """
 
 
@@ -101,10 +117,13 @@ def generate_player_preview(
         )
     else:
         research_targets = (
-            f"- 2026 dynasty outlook and ADP\n"
-            f"- Season projections (passing/rushing/receiving totals)\n"
-            f"- Vegas season player prop lines\n"
-            f"- Training camp/offseason news"
+            "- Dynasty ADP, rankings, and outlook for 2026"
+            " (use search_dynasty_analysis)\n"
+            "- Season projections — passing/rushing/receiving totals"
+            " (use search_dynasty_analysis)\n"
+            "- Vegas season player prop lines (use search_player_news)\n"
+            "- Training camp news or offseason role"
+            " (use search_player_news)"
         )
         write_system = _WRITE_SYSTEM_OFFSEASON.format(
             player_name=name,
@@ -126,12 +145,12 @@ def generate_player_preview(
         model="claude-haiku-4-5-20251001",
         api_key=ANTHROPIC_API_KEY,
         max_tokens=1024,
-    ).bind_tools([search_player_news])
+    ).bind_tools([search_player_news, search_dynasty_analysis])
 
     messages: list = [
         SystemMessage(content=research_system),
         HumanMessage(content=(
-            f"{STRATEGY_PREFIX}\n\n"
+            f"{get_runtime_context()}{STRATEGY_PREFIX}\n\n"
             f"Research {name} ({position}, {team}) now. "
             "Stop when you have the data you need."
         )),
@@ -143,9 +162,15 @@ def generate_player_preview(
         if not response.tool_calls:
             break
         for call in response.tool_calls:
-            if call["name"] == "search_player_news":
+            fn = call["name"]
+            if fn in ("search_player_news", "search_dynasty_analysis"):
                 try:
-                    result = search_player_news.invoke(call["args"])
+                    if fn == "search_player_news":
+                        result = search_player_news.invoke(call["args"])
+                    else:
+                        result = search_dynasty_analysis.invoke(
+                            call["args"]
+                        )
                 except Exception:
                     result = "No results found."
                 messages.append(ToolMessage(

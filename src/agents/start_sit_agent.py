@@ -8,6 +8,7 @@ from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from src.config import ANTHROPIC_API_KEY
 from src.tools.search_tools import search_player_news
 from src.strategy import STRATEGY_PREFIX
+from src.runtime_context import get_runtime_context
 
 _RESEARCH_SYSTEM = (
     "You are a dynasty fantasy football analyst. Research injury status, "
@@ -36,7 +37,10 @@ Rules:
 - 3 items, no more no less
 - start_player and sit_player must both be on the roster
 - Prefer same-position comparisons (RB vs RB, WR vs WR)
-- reason must be specific (cite matchup, injury, usage trend, or Vegas line)"""
+- reason MUST cite a specific number, stat, or fact from your research —
+  e.g. a snap%, target share, injury designation, Vegas O/U, or opponent
+  rank vs position. Vague reasons like "better matchup" are not allowed.
+- Base every decision on real data from your searches, not general knowledge"""
 
 
 def generate_start_sit(
@@ -70,7 +74,7 @@ def generate_start_sit(
 
     messages: list = [
         SystemMessage(content=_RESEARCH_SYSTEM),
-        HumanMessage(content=f"{STRATEGY_PREFIX}\n\n{context}"),
+        HumanMessage(content=f"{get_runtime_context()}{STRATEGY_PREFIX}\n\n{context}"),
     ]
 
     for _ in range(8):

@@ -7,7 +7,6 @@ from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 
 from src.config import ANTHROPIC_API_KEY
 from src.tools.search_tools import search_player_news
-from src.strategy import STRATEGY_PREFIX
 
 _RESEARCH_SYSTEM = """\
 You are a dynasty fantasy football analyst. Your job is to research players
@@ -33,17 +32,19 @@ or win streak. Write as if talking to the {my_team} owner.",
 Name specific players with **bold**.",
   "watch_out": "One sentence. The opponent's top threat or {my_team}'s \
 biggest weakness in this matchup. Name the player with **bold**.",
-  "move": "One sentence. The single most important roster action for \
-{my_team}: start **BenchPlayer** over **CurrentStarter**, OR add a \
-specific free agent NOT already on the roster. NEVER recommend adding \
-a player who is already on the bench — those are already owned. \
-If the starting lineup is already optimal, say so explicitly."
+  "move": "One sentence. The single most important THIS-WEEK lineup \
+decision for {my_team}: start **BenchPlayer** over **CurrentStarter**, \
+OR add a specific free agent NOT already on the roster. NEVER recommend \
+trades — the move field is for immediate lineup and waiver decisions only. \
+NEVER recommend adding a player who is already on the bench — those are \
+already owned. If the starting lineup is already optimal, say so explicitly."
 }}
 
 Additional rules:
 - Bold all player names: **Name**
 - Be direct and specific — no fluff, no hedging
 - Do NOT discuss the opponent's internal roster decisions
+- Do NOT suggest trades anywhere in this preview
 - The bench players listed in context are ALREADY OWNED — never suggest \
 adding them from waivers\
 """
@@ -95,7 +96,7 @@ def generate_matchup_preview(matchup: dict, season_type: str) -> dict:
     messages: list = [
         SystemMessage(content=_RESEARCH_SYSTEM),
         HumanMessage(content=(
-            f"{STRATEGY_PREFIX}\n\n{context}\n\n"
+            f"{context}\n\n"
             "Search for news on any players you want current info on "
             "before writing the preview."
         )),

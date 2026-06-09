@@ -1,6 +1,7 @@
 """Trade finder — proposals, recommendations, and value summaries."""
 import json
 import re
+from datetime import datetime
 
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import (
@@ -15,6 +16,8 @@ from src.tools.search_tools import (
     search_dynasty_analysis,
 )
 from src.strategy import STRATEGY_PREFIX
+from src.untouchables import get_untouchables_constraint
+from src.runtime_context import get_runtime_context
 
 _RESEARCH_SYSTEM = (
     "You are a dynasty fantasy football trade analyst. "
@@ -27,6 +30,8 @@ _RESEARCH_SYSTEM = (
 _WRITE_SYSTEM = """\
 You are a dynasty fantasy football trade analyst building trade
 proposals for {my_team}.
+
+{untouchables}
 
 Output ONLY a valid JSON object. Start with {{ and end with }}.
 
@@ -45,7 +50,10 @@ and what the return does for {my_team}."
 
 Rules:
 - Exactly 3 proposals, each naming a real team from the roster list
-- Return packages must be fair based on KTC values you researched
+- Return packages MUST be grounded in the KTC values you researched —
+  do not invent or estimate values from training data alone
+- HARD RULE: NEVER include {current_year} picks — the {current_year}
+  dynasty draft has already occurred. Earliest picks are {next_year}.
 - Picks format: "YEAR Xth Round Pick" (e.g. "2027 1st Round Pick")
 - If no picks in return, use empty array []
 - Do not include the same team more than once"""
@@ -60,7 +68,9 @@ _REC_RESEARCH_SYSTEM = (
 
 _REC_WRITE_SYSTEM = """\
 You are a dynasty fantasy football analyst building trade
-recommendations for {my_team}.
+recommendations for {{my_team}}.
+
+{{untouchables}}
 
 Based on the research above, identify the 3 best trade opportunities.
 Consider: sell-high windows, depth surplus, aging veterans,
@@ -69,23 +79,32 @@ positional imbalances.
 Output ONLY a valid JSON object. Start with {{ and end with }}.
 
 Format:
-{{
+{{{{
   "recommendations": [
-    {{
+    {{{{
       "sell_player": "Player Name",
       "sell_player_position": "RB",
-      "get_back": "WR2 + 2027 1st Round Pick",
+      "get_back": "2027 1st Round Pick + 2027 2nd Round Pick",
       "rationale": "2 sentences based on current market — why to sell \
 now, and what the return buys the team."
-    }}
+    }}}}
   ]
-}}
+}}}}
 
 Rules:
 - Exactly 3 recommendations
-- Base get_back on current KTC values from your research
+- HARD RULE: NEVER include {current_year} picks in any recommendation.
+  The {current_year} dynasty rookie draft has already occurred. The
+  earliest available picks are {next_year} picks. Any {current_year}
+  pick in a get_back is wrong.
+- Elite players (top-5 at position) return elite packages — an elite RB1
+  or WR1 commands at minimum two premium 1st round picks or a star player
+  plus a 1st. Do not lowball top assets.
+- If the return includes multiple picks from the same round, consolidate:
+  say "two 2027 1st Round Picks" not "2027 1st Round Pick + 2027 1st Round Pick"
+- ONLY recommend selling players you found real value data for in research
 - rationale must reference specific market context (age, value trend,
-  roster fit)"""
+  roster fit) from your research"""
 
 
 def generate_trade_proposals(
@@ -146,14 +165,15 @@ def generate_trade_proposals(
         model="claude-haiku-4-5-20251001",
         api_key=ANTHROPIC_API_KEY,
         max_tokens=1024,
-    ).bind_tools([get_trade_value])
+    ).bind_tools([get_trade_value, search_dynasty_analysis])
 
     messages: list = [
         SystemMessage(content=_RESEARCH_SYSTEM),
         HumanMessage(
             content=(
-                f"{STRATEGY_PREFIX}\n\n{context}\n\n"
-                "Search KTC values for each offered player."
+                f"{get_runtime_context()}{STRATEGY_PREFIX}\n\n{context}\n\n"
+                "Search KTC values and dynasty analysis for each "
+                "offered player before building proposals."
             )
         ),
     ]
@@ -164,9 +184,15 @@ def generate_trade_proposals(
         if not response.tool_calls:
             break
         for call in response.tool_calls:
-            if call["name"] == "get_trade_value":
+            fn = call["name"]
+            if fn in ("get_trade_value", "search_dynasty_analysis"):
                 try:
-                    result = get_trade_value.invoke(call["args"])
+                    if fn == "get_trade_value":
+                        result = get_trade_value.invoke(call["args"])
+                    else:
+                        result = search_dynasty_analysis.invoke(
+                            call["args"]
+                        )
                 except Exception:
                     result = "No results found."
                 messages.append(
@@ -187,7 +213,13 @@ def generate_trade_proposals(
         max_tokens=900,
     )
 
-    write_system = _WRITE_SYSTEM.format(my_team=my_team)
+    _year = datetime.now().year
+    write_system = _WRITE_SYSTEM.format(
+        my_team=my_team,
+        untouchables=get_untouchables_constraint(),
+        current_year=_year,
+        next_year=_year + 1,
+    )
     final = llm_writer.invoke(
         [SystemMessage(content=write_system)] + messages[1:]
     )
@@ -229,7 +261,7 @@ def generate_trade_recommendations(
 
     messages: list = [
         SystemMessage(content=_REC_RESEARCH_SYSTEM),
-        HumanMessage(content=f"{STRATEGY_PREFIX}\n\n{context}"),
+        HumanMessage(content=f"{get_runtime_context()}{STRATEGY_PREFIX}\n\n{context}"),
     ]
 
     for _ in range(10):
@@ -267,7 +299,13 @@ def generate_trade_recommendations(
         max_tokens=700,
     )
 
-    write_system = _REC_WRITE_SYSTEM.format(my_team=my_team)
+    _year = datetime.now().year
+    write_system = _REC_WRITE_SYSTEM.format(
+        my_team=my_team,
+        untouchables=get_untouchables_constraint(),
+        current_year=_year,
+        next_year=_year + 1,
+    )
     final = llm_writer.invoke(
         [SystemMessage(content=write_system)] + messages[1:]
     )
