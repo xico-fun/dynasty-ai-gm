@@ -845,13 +845,13 @@ def get_matchup_startsit():
 
 @app.get("/matchup-injuries")
 def get_matchup_injuries():
-    """Injury & news snapshot for my key starters. Cached daily."""
+    """Injury report — only players on my roster with an active injury designation."""
     from src.tools.search_tools import search_player_news
+    from src.tools.sleeper_tools import _get_all_players
 
     d = _my_roster_data()
     week = d["week"]
     season = d["season"]
-    season_type = d["season_type"]
     ck = f"{season}_week{week}_inj"
 
     if INJURIES_CACHE.exists():
@@ -862,29 +862,49 @@ def get_matchup_injuries():
         except Exception:
             pass
 
+    # Pull injury status directly from Sleeper player DB
+    all_players = _get_all_players()
     skill = {"QB", "RB", "WR", "TE"}
-    starters = [p for p in d["starters"] if p["position"] in skill][:6]
+    all_roster = [
+        p for p in (d["starters"] + d.get("bench", []))
+        if p["position"] in skill
+    ]
 
+    # Filter to players with an actual injury designation
+    INJURED_STATUSES = {"Questionable", "Doubtful", "Out", "IR",
+                        "PUP", "Sus", "COV", "DNR", "NA"}
+    injured = []
+    for p in all_roster:
+        sleeper_data = all_players.get(str(p["id"]), {})
+        status = sleeper_data.get("injury_status") or sleeper_data.get("status") or ""
+        if status in INJURED_STATUSES:
+            injured.append({**p, "injury_status": status})
+
+    if not injured:
+        content = {"players": []}
+        CACHE_DIR.mkdir(exist_ok=True)
+        INJURIES_CACHE.write_text(
+            json.dumps({"cache_key": ck, "content": content})
+        )
+        return content
+
+    # Only search news for players who are actually injured
     results = []
-    for p in starters:
+    for p in injured:
         try:
             raw = search_player_news.invoke({"player_name": p["name"]})
             if isinstance(raw, dict):
                 raw = raw.get("results", [])
-            snippet = raw[0].get("content", "").strip()[:220] if raw else ""
-            results.append({
-                "player_name": p["name"],
-                "position": p["position"],
-                "team": p["team"],
-                "snippet": snippet or "No recent news found.",
-            })
+            snippet = raw[0].get("content", "").strip()[:250] if raw else ""
         except Exception:
-            results.append({
-                "player_name": p["name"],
-                "position": p["position"],
-                "team": p["team"],
-                "snippet": "No recent news found.",
-            })
+            snippet = ""
+        results.append({
+            "player_name": p["name"],
+            "position": p["position"],
+            "team": p["team"],
+            "injury_status": p["injury_status"],
+            "snippet": snippet or f"{p['name']} is listed as {p['injury_status']}.",
+        })
 
     content = {"players": results}
     CACHE_DIR.mkdir(exist_ok=True)

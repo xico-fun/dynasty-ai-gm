@@ -25,60 +25,80 @@ export default function Sidebar() {
 
   return (
     <aside
-      className="flex flex-col min-h-screen border-r shrink-0 transition-all duration-200"
+      className="flex flex-col min-h-screen shrink-0 transition-all duration-300"
       style={{
         width: collapsed ? "56px" : "224px",
-        background: "var(--surface)",
-        borderColor: "var(--border)",
+        background: "linear-gradient(180deg, #161a26 0%, #111420 100%)",
+        borderRight: "1px solid var(--border-subtle)",
+        boxShadow: "1px 0 0 0 rgba(255,255,255,0.03)",
       }}>
 
       {/* Logo + toggle */}
-      <div className="flex items-center border-b px-3 py-5"
+      <div
+        className="flex items-center px-3 py-5"
         style={{
-          borderColor: "var(--border)",
+          borderBottom: "1px solid var(--border-subtle)",
           justifyContent: collapsed ? "center" : "space-between",
         }}>
         {!collapsed && (
-          <div>
-            <span className="text-sm font-semibold tracking-widest uppercase"
-              style={{ color: "var(--accent)" }}>Dynasty</span>
-            <p className="text-lg font-bold leading-tight"
+          <div className="select-none">
+            <p className="text-xs font-semibold tracking-[0.18em] uppercase"
+              style={{ color: "var(--accent)", opacity: 0.85 }}>Dynasty</p>
+            <p className="text-base font-bold tracking-tight leading-tight"
               style={{ color: "var(--foreground)" }}>AI GM</p>
           </div>
         )}
         <button
           onClick={() => setCollapsed(c => !c)}
-          className="rounded-lg p-1.5 cursor-pointer transition-colors"
+          className="rounded-md p-1.5 cursor-pointer transition-colors"
           style={{ color: "var(--muted)" }}
           title={collapsed ? "Expand sidebar" : "Collapse sidebar"}>
           {collapsed
-            ? <ChevronRight size={16} />
-            : <ChevronLeft size={16} />}
+            ? <ChevronRight size={15} />
+            : <ChevronLeft size={15} />}
         </button>
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 px-2 py-4 space-y-1">
+      <nav className="flex-1 px-2 py-3 space-y-0.5">
         {NAV.map(({ href, label, icon: Icon }) => {
           const active = pathname === href;
           return (
             <Link key={href} href={href}
               title={collapsed ? label : undefined}
               className={[
-                "relative flex items-center gap-3 rounded-lg px-2 py-2 text-sm",
-                "font-medium transition-colors",
-                active
-                  ? "bg-surface-hover text-foreground"
-                  : "text-muted hover:bg-surface-hover hover:text-foreground",
+                "relative flex items-center gap-2.5 rounded-lg px-2 py-2 text-sm",
+                "font-medium transition-all duration-150",
                 collapsed ? "justify-center" : "",
-              ].join(" ")}>
+              ].join(" ")}
+              style={{
+                color: active ? "var(--foreground)" : "var(--muted)",
+                background: active
+                  ? "linear-gradient(90deg, rgba(34,197,94,0.1) 0%, rgba(34,197,94,0.04) 100%)"
+                  : "transparent",
+              }}
+              onMouseEnter={e => {
+                if (!active) (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.04)";
+                if (!active) (e.currentTarget as HTMLElement).style.color = "var(--foreground)";
+              }}
+              onMouseLeave={e => {
+                if (!active) (e.currentTarget as HTMLElement).style.background = "transparent";
+                if (!active) (e.currentTarget as HTMLElement).style.color = "var(--muted)";
+              }}>
               {/* Green left accent bar on active item */}
               {active && !collapsed && (
-                <span className="absolute left-0 top-1 bottom-1 w-0.5 rounded-full"
+                <span
+                  className="absolute left-0 top-1.5 bottom-1.5 w-[2px] rounded-full"
                   style={{ background: "var(--accent)" }} />
               )}
-              <Icon size={17} className="shrink-0" />
-              {!collapsed && label}
+              <Icon
+                size={16}
+                className="shrink-0"
+                style={{ color: active ? "var(--accent)" : "inherit" }}
+              />
+              {!collapsed && (
+                <span className="tracking-tight">{label}</span>
+              )}
             </Link>
           );
         })}
@@ -86,8 +106,12 @@ export default function Sidebar() {
 
       {/* Footer */}
       {!collapsed && (
-        <div className="px-5 py-4 border-t text-xs"
-          style={{ borderColor: "var(--border)", color: "var(--muted)" }}>
+        <div className="px-4 py-4 text-xs"
+          style={{
+            borderTop: "1px solid var(--border-subtle)",
+            color: "var(--muted)",
+            opacity: 0.6,
+          }}>
           Stl Dynasty · 2026
         </div>
       )}

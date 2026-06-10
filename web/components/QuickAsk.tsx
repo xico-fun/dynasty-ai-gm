@@ -64,7 +64,7 @@ export default function QuickAsk() {
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
         className="flex items-center px-3 py-2 rounded-xl text-sm font-medium
-          transition-all duration-200 cursor-pointer active:scale-95"
+          transition-all duration-200 cursor-pointer active:scale-95 neon-pulse"
         style={hovered ? NEON.hover : NEON.base}>
         Ask AI GM
       </button>

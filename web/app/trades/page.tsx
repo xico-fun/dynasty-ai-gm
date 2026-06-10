@@ -154,10 +154,10 @@ export default function TradesPage() {
   );
 
   return (
-    <div className="flex flex-col h-screen overflow-hidden">
+    <div className="flex flex-col h-screen overflow-hidden animate-fade-up">
       {/* Header */}
       <div className="px-6 py-4 border-b shrink-0"
-        style={{ borderColor: "var(--border)", background: "var(--surface)" }}>
+        style={{ borderColor: "rgba(255,255,255,0.05)", background: "transparent" }}>
         <h1 className="text-xl font-bold">{rosterData?.team_name ?? "Trade Center"}</h1>
         <p className="text-xs mt-0.5" style={{ color: "var(--muted)" }}>
           {rosterData?.record} &middot; {rosterData?.season} Season &middot; {rosterData?.phase}
@@ -204,12 +204,11 @@ export default function TradesPage() {
 
 function SectionLabel({ label }: { label: string }) {
   return (
-    <div className="px-4 py-3 border-b shrink-0 flex items-center gap-2"
-      style={{ borderColor: "var(--border)" }}>
-      <span className="w-1 h-3 rounded-full shrink-0"
-        style={{ background: "var(--accent)" }} />
-      <span className="text-xs font-semibold uppercase tracking-wider"
-        style={{ color: "var(--muted)" }}>{label}</span>
+    <div className="px-4 py-3 border-b shrink-0 flex items-center gap-2.5"
+      style={{ borderColor: "rgba(255,255,255,0.05)" }}>
+      <span className="w-[3px] h-3 rounded-full shrink-0"
+        style={{ background: "linear-gradient(180deg, var(--accent) 0%, rgba(34,197,94,0.2) 100%)" }} />
+      <span className="label-section">{label}</span>
     </div>
   );
 }
@@ -234,13 +233,12 @@ function RosterPanel({ rosterData, activeTab, onTabChange, isInOffer, onAdd, onR
     activeTab === "Picks" && rosterData ? rosterData.picks : [];
 
   return (
-    <div className="w-5/12 flex flex-col rounded-xl border overflow-hidden"
-      style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
+    <div className="card-glass w-5/12 flex flex-col rounded-xl overflow-hidden">
       <SectionLabel label="My Roster" />
 
       {/* Tabs */}
       <div className="flex shrink-0 px-3 pt-2 border-b"
-        style={{ borderColor: "var(--border)" }}>
+        style={{ borderColor: "rgba(255,255,255,0.05)" }}>
         {TABS.map(tab => (
           <button
             key={tab}
@@ -365,13 +363,12 @@ function TradeBuilderPanel({ tradeOffer, onRemove, finding, proposals,
   const hasResults = proposals !== null;
 
   return (
-    <div className="flex-1 flex flex-col rounded-xl border overflow-hidden"
-      style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
+    <div className="card-glass flex-1 flex flex-col rounded-xl overflow-hidden">
       <SectionLabel label="Trade Away" />
 
       {/* Offer chips + inline button */}
       <div className="px-4 py-3 border-b shrink-0"
-        style={{ borderColor: "var(--border)" }}>
+        style={{ borderColor: "rgba(255,255,255,0.05)" }}>
         <div className="flex flex-wrap items-center gap-2">
           {tradeOffer.length === 0 && (
             <p className="text-xs italic flex-1" style={{ color: "var(--muted)" }}>
@@ -438,7 +435,7 @@ function TradeBuilderPanel({ tradeOffer, onRemove, finding, proposals,
           <>
             {/* Partner tabs */}
             <div className="flex border-b px-4 shrink-0"
-              style={{ borderColor: "var(--border)" }}>
+              style={{ borderColor: "rgba(255,255,255,0.05)" }}>
               {proposals.map((p, i) => (
                 <button
                   key={i}
@@ -526,7 +523,7 @@ function ProposalCard({ proposal }: { proposal: Proposal }) {
           ))}
         </div>
       </div>
-      <div className="pt-3 border-t" style={{ borderColor: "var(--border)" }}>
+      <div className="pt-3 border-t" style={{ borderColor: "rgba(255,255,255,0.05)" }}>
         <p className="text-xs font-semibold uppercase tracking-wide mb-1.5"
           style={{ color: "var(--muted)" }}>Why it works</p>
         <p className="text-sm leading-relaxed" style={{ color: "var(--foreground)" }}>
@@ -541,8 +538,7 @@ function ProposalCard({ proposal }: { proposal: Proposal }) {
 
 function TrendingValuesPanel({ players }: { players: TrendingValue[] | null }) {
   return (
-    <div className="w-1/2 flex flex-col rounded-xl border overflow-hidden"
-      style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
+    <div className="card-glass w-1/2 flex flex-col rounded-xl overflow-hidden">
       <SectionLabel label="Trade Market" />
       <div className="flex-1 overflow-y-auto p-3 space-y-2">
         {players === null && (
@@ -566,8 +562,7 @@ function TrendingValuesPanel({ players }: { players: TrendingValue[] | null }) {
           const c = POS_COLOR[p.position] ?? "var(--muted)";
           return (
             <div key={p.id}
-              className="rounded-xl border px-3 py-2.5"
-              style={{ borderColor: "var(--border)", background: "var(--surface-hover)" }}>
+              className="card-inner rounded-xl px-3 py-2.5">
               <div className="flex items-center gap-2 mb-1.5">
                 <span className="text-xs font-bold px-1.5 py-0.5 rounded shrink-0"
                   style={{ background: c + "22", color: c }}>
@@ -591,8 +586,7 @@ function TrendingValuesPanel({ players }: { players: TrendingValue[] | null }) {
 
 function RecommendationsPanel({ recommendations }: { recommendations: Recommendation[] | null }) {
   return (
-    <div className="w-1/2 flex flex-col rounded-xl border overflow-hidden"
-      style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
+    <div className="card-glass w-1/2 flex flex-col rounded-xl overflow-hidden">
       <SectionLabel label="Trade Recommendations" />
       <div className="flex-1 overflow-y-auto p-3 space-y-3">
         {recommendations === null && (
@@ -615,8 +609,7 @@ function RecommendationsPanel({ recommendations }: { recommendations: Recommenda
         {recommendations !== null && recommendations.map((rec, i) => {
           const c = POS_COLOR[rec.sell_player_position] ?? "var(--muted)";
           return (
-            <div key={i} className="rounded-xl border p-3"
-              style={{ borderColor: "var(--border)", background: "var(--surface-hover)" }}>
+            <div key={i} className="card-inner rounded-xl p-3">
               <div className="flex items-center gap-2 mb-2 flex-wrap">
                 <span className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs font-semibold shrink-0"
                   style={{ background: c + "22", color: c, border: `1px solid ${c}44` }}>

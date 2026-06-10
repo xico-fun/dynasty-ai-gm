@@ -118,11 +118,11 @@ export default function TeamPage() {
   );
 
   return (
-    <div className="flex flex-col h-screen overflow-hidden">
+    <div className="flex flex-col h-screen overflow-hidden animate-fade-up">
       {/* Header */}
       <div className="px-6 py-4 border-b shrink-0"
-        style={{ borderColor: "var(--border)", background: "var(--surface)" }}>
-        <h1 className="text-xl font-bold">{roster.team_name}</h1>
+        style={{ borderColor: "var(--border-subtle)", background: "transparent" }}>
+        <h1 className="text-xl font-bold tracking-tight">{roster.team_name}</h1>
         <p className="text-xs mt-0.5" style={{ color: "var(--muted)" }}>
           {roster.record} &middot; {roster.season} Season &middot; {roster.phase}
         </p>
@@ -131,8 +131,7 @@ export default function TeamPage() {
       {/* Body */}
       <div className="flex flex-1 overflow-hidden p-4 gap-4">
         {/* Left — Roster */}
-        <div className="w-1/2 flex flex-col rounded-xl border overflow-hidden"
-          style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
+        <div className="card-glass w-1/2 flex flex-col rounded-xl overflow-hidden">
           <SectionLabel label="My Roster" />
           <div className="flex-1 overflow-y-auto p-4 space-y-5">
             <RosterSection
@@ -149,14 +148,12 @@ export default function TeamPage() {
         </div>
 
         {/* Right — News + Trending */}
-        <div className="w-1/2 flex flex-col gap-4 overflow-hidden">
-          <div className="flex-1 flex flex-col rounded-xl border overflow-hidden"
-            style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
+        <div className="w-1/2 flex flex-col gap-4 overflow-hidden animate-stagger">
+          <div className="card-glass flex-1 flex flex-col rounded-xl overflow-hidden">
             <SectionLabel label="Player News" />
             <NewsPanel news={news} />
           </div>
-          <div className="flex-1 flex flex-col rounded-xl border overflow-hidden"
-            style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
+          <div className="card-glass flex-1 flex flex-col rounded-xl overflow-hidden">
             <SectionLabel label="Trending Players" />
             <TrendingPanel players={trending} />
           </div>
@@ -170,12 +167,11 @@ export default function TeamPage() {
 
 function SectionLabel({ label }: { label: string }) {
   return (
-    <div className="px-4 py-3 border-b shrink-0 flex items-center gap-2"
-      style={{ borderColor: "var(--border)" }}>
-      <span className="w-1 h-3 rounded-full shrink-0"
-        style={{ background: "var(--accent)" }} />
-      <span className="text-xs font-semibold uppercase tracking-wider"
-        style={{ color: "var(--muted)" }}>{label}</span>
+    <div className="px-4 py-3 border-b shrink-0 flex items-center gap-2.5"
+      style={{ borderColor: "var(--border-subtle)" }}>
+      <span className="w-[3px] h-3 rounded-full shrink-0"
+        style={{ background: "linear-gradient(180deg, var(--accent) 0%, rgba(34,197,94,0.3) 100%)" }} />
+      <span className="label-section">{label}</span>
     </div>
   );
 }
@@ -255,7 +251,7 @@ function PlayerRow({ player, expanded, loading, preview, onToggle }: {
       {/* Inline preview accordion */}
       {expanded && (
         <div className="px-4 pb-4 pt-2 border-t"
-          style={{ borderColor: posColor + "33", background: "var(--surface-hover)" }}>
+          style={{ borderColor: "rgba(255,255,255,0.05)", background: "rgba(255,255,255,0.02)" }}>
           {loading && (
             <p className="text-xs italic py-2" style={{ color: "var(--muted)" }}>
               Generating preview…
@@ -305,7 +301,7 @@ function PlayerRow({ player, expanded, loading, preview, onToggle }: {
               {/* Summary */}
               {preview.summary && (
                 <p className="text-xs leading-relaxed pt-1 border-t"
-                  style={{ color: "var(--foreground)", borderColor: "var(--border)" }}>
+                  style={{ color: "var(--foreground)", borderColor: "rgba(255,255,255,0.05)" }}>
                   {renderBold(preview.summary)}
                 </p>
               )}
@@ -359,9 +355,8 @@ function NewsPanel({ news }: { news: NewsData | null }) {
 function ArticleCard({ article }: { article: Article }) {
   return (
     <a href={article.url || "#"} target="_blank" rel="noopener noreferrer"
-      className="block rounded-xl border overflow-hidden transition-colors
-        hover:bg-surface-hover group cursor-pointer"
-      style={{ borderColor: "var(--border)" }}>
+      className="card-inner block rounded-xl overflow-hidden transition-colors
+        hover:bg-surface-hover group cursor-pointer">
       <div className="px-3 py-1.5 flex items-center gap-2"
         style={{ background: article.source_color + "22" }}>
         <span className="w-2 h-2 rounded-full shrink-0"
@@ -405,8 +400,7 @@ function TrendingPanel({ players }: { players: TrendingPlayer[] }) {
         const flagColor = isWaiver ? "var(--accent)" : "#f59e0b";
 
         return (
-          <div key={p.id} className="flex items-center gap-3 px-3 py-2.5 rounded-xl border"
-            style={{ borderColor: "var(--border)", background: "var(--surface-hover)" }}>
+          <div key={p.id} className="card-inner flex items-center gap-3 px-3 py-2.5 rounded-xl">
             <span className="text-xs font-bold w-8 text-center py-0.5 rounded shrink-0"
               style={{ background: posColor + "22", color: posColor }}>
               {p.position}

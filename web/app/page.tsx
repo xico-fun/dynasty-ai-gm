@@ -60,7 +60,8 @@ type StartSitState =
   | { status: "done"; decisions: StartSitDecision[]; offseason: boolean };
 
 type InjuryItem = {
-  player_name: string; position: string; team: string; snippet: string;
+  player_name: string; position: string; team: string;
+  injury_status: string; snippet: string;
 };
 type InjuryState =
   | { status: "idle" }
@@ -206,11 +207,11 @@ export default function Dashboard() {
   );
 
   return (
-    <div className="flex flex-col h-screen overflow-hidden">
+    <div className="flex flex-col h-screen overflow-hidden animate-fade-up">
       {/* Header */}
       <div className="px-6 py-4 border-b shrink-0"
-        style={{ borderColor: "var(--border)", background: "var(--surface)" }}>
-        <h1 className="text-xl font-bold">{data.team_name}</h1>
+        style={{ borderColor: "rgba(255,255,255,0.05)", background: "transparent" }}>
+        <h1 className="text-xl font-bold tracking-tight">{data.team_name}</h1>
         <p className="text-xs mt-0.5" style={{ color: "var(--muted)" }}>
           {data.record} &middot; {data.season} Season &middot; {data.phase}
         </p>
@@ -219,8 +220,7 @@ export default function Dashboard() {
       {/* Content */}
       <div className="flex flex-col flex-1 overflow-hidden p-4 gap-4">
         {/* Top — Matchup */}
-        <div className="flex-1 min-h-0 rounded-xl border overflow-hidden flex flex-col"
-          style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
+        <div className="card-glass flex-1 min-h-0 rounded-xl overflow-hidden flex flex-col">
           {data.matchup ? (
             <MatchupCard
               matchup={data.matchup}
@@ -245,7 +245,7 @@ export default function Dashboard() {
         </div>
 
         {/* Bottom — Standings + Transactions */}
-        <div className="flex-1 min-h-0 flex gap-4">
+        <div className="flex-1 min-h-0 flex gap-4 animate-stagger">
           <StandingsCard standings={data.standings} />
           <TransactionsCard transactions={data.transactions} />
         </div>
@@ -260,7 +260,7 @@ const CHIPS: { id: Chip; label: string }[] = [
   { id: "preview",  label: "Matchup Preview" },
   { id: "players",  label: "Key Players" },
   { id: "startsit", label: "Start / Sit" },
-  { id: "injuries", label: "Injury & News" },
+  { id: "injuries", label: "Injury Report" },
 ];
 
 function MatchupCard({
@@ -277,7 +277,7 @@ function MatchupCard({
     <>
       {/* Matchup header */}
       <div className="shrink-0 px-5 py-3 border-b"
-        style={{ borderColor: "var(--border)" }}>
+        style={{ borderColor: "rgba(255,255,255,0.05)" }}>
         <div className="flex items-center gap-4">
           {/* My team */}
           <div className="flex-1 min-w-0">
@@ -311,18 +311,19 @@ function MatchupCard({
 
       {/* Chips row */}
       <div className="flex border-b px-4 shrink-0"
-        style={{ borderColor: "var(--border)" }}>
+        style={{ borderColor: "rgba(255,255,255,0.05)" }}>
         {CHIPS.map(({ id, label }) => (
           <button
             key={id}
             onClick={() => onChip(id)}
-            className="px-3 py-2.5 text-xs font-medium transition-all
-              cursor-pointer mr-1 whitespace-nowrap"
+            className={`px-3 py-2.5 text-xs font-medium transition-all
+              cursor-pointer mr-1 whitespace-nowrap
+              ${activeChip === id ? "chip-active" : ""}`}
             style={{
-              color: activeChip === id ? "var(--foreground)" : "var(--muted)",
+              color: activeChip === id ? "var(--accent)" : "var(--muted)",
               borderBottom: activeChip === id
-                ? "2px solid var(--accent)"
-                : "2px solid transparent",
+                ? "0.75px solid var(--accent)"
+                : "0.75px solid transparent",
               marginBottom: "-1px",
             }}>
             {label}
@@ -404,7 +405,7 @@ function PreviewChip({
             disabled={regenerating}
             className="text-xs px-2 py-1 rounded-lg border transition-colors
               disabled:opacity-40 cursor-pointer whitespace-nowrap shrink-0"
-            style={{ borderColor: "var(--border)", color: "var(--muted)" }}>
+            style={{ borderColor: "rgba(255,255,255,0.05)", color: "var(--muted)" }}>
             {regenerating ? "Updating…" : "↺ Update"}
           </button>
         </div>
@@ -415,7 +416,7 @@ function PreviewChip({
       </div>
       {sections.map(({ label, text }) => (
         <div key={label} className="pt-3 border-t"
-          style={{ borderColor: "var(--border)" }}>
+          style={{ borderColor: "rgba(255,255,255,0.05)" }}>
           <p className="text-xs font-semibold uppercase tracking-wider mb-1"
             style={{ color: "var(--muted)" }}>{label}</p>
           <p className="text-sm leading-relaxed"
@@ -433,7 +434,7 @@ function PlayersChip({ spotlight }: { spotlight: SpotlightState }) {
   if (spotlight.status === "idle") return <ChipEmpty label="No spotlight available" />;
 
   return (
-    <div className="p-3 flex gap-2 h-full">
+    <div className="p-3 flex gap-2 h-full animate-stagger">
       {spotlight.players.map((p, i) => (
         <CompactSpotlightCard key={i} player={p} />
       ))}
@@ -463,8 +464,7 @@ function CompactSpotlightCard({ player }: { player: SpotlightPlayer }) {
   const vegas = cleanStatText(player.vegas ?? "");
 
   return (
-    <div className="flex-1 rounded-xl border px-3 py-2.5 flex flex-col gap-1.5 min-w-0 overflow-hidden"
-      style={{ borderColor: "var(--border)", background: "var(--surface-hover)" }}>
+    <div className="card-inner flex-1 rounded-xl px-3 py-2.5 flex flex-col gap-1.5 min-w-0 overflow-hidden">
       {/* Single header row: pos | name | team | role */}
       <div className="flex items-center gap-1.5 min-w-0">
         <span className="text-xs font-bold px-1.5 py-0.5 rounded shrink-0"
@@ -481,7 +481,7 @@ function CompactSpotlightCard({ player }: { player: SpotlightPlayer }) {
         </span>
       </div>
       {/* Divider */}
-      <div className="border-t shrink-0" style={{ borderColor: "var(--border)" }} />
+      <div className="border-t shrink-0" style={{ borderColor: "rgba(255,255,255,0.05)" }} />
       {/* Proj + Vegas — side by side */}
       <div className="flex gap-3 shrink-0">
         {proj && (
@@ -506,7 +506,7 @@ function CompactSpotlightCard({ player }: { player: SpotlightPlayer }) {
       {/* Note — capped at 2 lines, contained */}
       {cleanNote && (
         <p className="text-xs leading-relaxed pt-1 border-t line-clamp-5 flex-1 overflow-hidden"
-          style={{ borderColor: "var(--border)", color: "var(--muted)" }}>
+          style={{ borderColor: "rgba(255,255,255,0.05)", color: "var(--muted)" }}>
           {cleanNote}
         </p>
       )}
@@ -527,8 +527,7 @@ function StartSitChip({ state }: { state: StartSitState }) {
         const startColor = POS_COLOR[d.start_player.position] ?? "var(--accent)";
         const sitColor = "#ef4444";
         return (
-          <div key={i} className="rounded-xl border p-3"
-            style={{ borderColor: "var(--border)", background: "var(--surface-hover)" }}>
+          <div key={i} className="card-inner rounded-xl p-3">
             <div className="flex items-center gap-3 mb-2">
               {/* Start */}
               <div className="flex-1 min-w-0">
@@ -568,7 +567,7 @@ function StartSitChip({ state }: { state: StartSitState }) {
               </div>
             </div>
             <p className="text-xs leading-relaxed pt-2 border-t"
-              style={{ borderColor: "var(--border)", color: "var(--muted)" }}>
+              style={{ borderColor: "rgba(255,255,255,0.05)", color: "var(--muted)" }}>
               {d.reason}
             </p>
           </div>
@@ -578,24 +577,36 @@ function StartSitChip({ state }: { state: StartSitState }) {
   );
 }
 
+const INJURY_STATUS_COLOR: Record<string, string> = {
+  Out: "#ef4444", IR: "#ef4444", DNR: "#ef4444", NA: "#ef4444",
+  Doubtful: "#f97316", PUP: "#f97316", Sus: "#f97316",
+  Questionable: "#f59e0b", COV: "#f59e0b",
+};
+
 function InjuryChip({ state }: { state: InjuryState }) {
-  if (state.status === "loading") return <ChipLoading label="Fetching injury & news updates…" />;
+  if (state.status === "loading") return <ChipLoading label="Checking injury report…" />;
   if (state.status === "idle") return <ChipEmpty label="Loading…" />;
-  if (state.players.length === 0) return <ChipEmpty label="No news found" />;
+  if (state.players.length === 0) return (
+    <ChipEmpty label="No injured players on your roster" />
+  );
 
   return (
     <div className="p-4 space-y-3">
       {state.players.map((p, i) => {
         const c = POS_COLOR[p.position] ?? "var(--muted)";
+        const statusColor = INJURY_STATUS_COLOR[p.injury_status] ?? "var(--warning)";
         return (
-          <div key={i} className="rounded-xl border p-3"
-            style={{ borderColor: "var(--border)", background: "var(--surface-hover)" }}>
+          <div key={i} className="card-inner rounded-xl p-3">
             <div className="flex items-center gap-2 mb-1.5">
-              <span className="text-xs font-bold px-1.5 py-0.5 rounded"
+              <span className="text-xs font-bold px-1.5 py-0.5 rounded shrink-0"
                 style={{ background: c + "22", color: c }}>
                 {p.position}
               </span>
               <p className="text-sm font-medium flex-1 truncate">{p.player_name}</p>
+              <span className="text-xs font-semibold px-1.5 py-0.5 rounded shrink-0"
+                style={{ background: statusColor + "22", color: statusColor }}>
+                {p.injury_status}
+              </span>
               <p className="text-xs shrink-0" style={{ color: "var(--muted)" }}>{p.team}</p>
             </div>
             <p className="text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
@@ -636,15 +647,14 @@ const ROLE_CONFIG = {
 
 function StandingsCard({ standings }: { standings: Standing[] }) {
   return (
-    <div className="flex-1 flex flex-col rounded-xl border overflow-hidden"
-      style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
+    <div className="card-glass flex-1 flex flex-col rounded-xl overflow-hidden">
       <SectionLabel label="League Standings" />
       <div className="overflow-y-auto flex-1">
         {standings.map((s, i) => (
           <div key={i}
             className="flex items-center justify-between px-4 py-2.5 border-b last:border-0"
             style={{
-              borderColor: "var(--border)",
+              borderColor: "rgba(255,255,255,0.05)",
               background: s.is_me ? "var(--surface-hover)" : "transparent",
             }}>
             <div className="flex items-center gap-2.5 min-w-0">
@@ -683,8 +693,7 @@ function TransactionsCard({ transactions }: { transactions: Transaction[] }) {
   };
 
   return (
-    <div className="flex-1 flex flex-col rounded-xl border overflow-hidden"
-      style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
+    <div className="card-glass flex-1 flex flex-col rounded-xl overflow-hidden">
       <SectionLabel label="Recent Transactions" />
       <div className="overflow-y-auto flex-1">
         {transactions.length === 0 ? (
@@ -695,7 +704,7 @@ function TransactionsCard({ transactions }: { transactions: Transaction[] }) {
           </div>
         ) : transactions.map((t, i) => (
           <div key={i} className="px-4 py-2.5 border-b last:border-0"
-            style={{ borderColor: "var(--border)" }}>
+            style={{ borderColor: "rgba(255,255,255,0.05)" }}>
             <div className="flex items-center gap-2 mb-1">
               <span className="text-xs font-medium truncate">{t.team}</span>
               {t.type && (
@@ -727,12 +736,11 @@ function TransactionsCard({ transactions }: { transactions: Transaction[] }) {
 
 function SectionLabel({ label }: { label: string }) {
   return (
-    <div className="px-4 py-3 border-b shrink-0 flex items-center gap-2"
-      style={{ borderColor: "var(--border)" }}>
-      <span className="w-1 h-3 rounded-full shrink-0"
-        style={{ background: "var(--accent)" }} />
-      <span className="text-xs font-semibold uppercase tracking-wider"
-        style={{ color: "var(--muted)" }}>{label}</span>
+    <div className="px-4 py-3 border-b shrink-0 flex items-center gap-2.5"
+      style={{ borderColor: "rgba(255,255,255,0.05)" }}>
+      <span className="w-[3px] h-3 rounded-full shrink-0"
+        style={{ background: "linear-gradient(180deg, var(--accent) 0%, rgba(34,197,94,0.2) 100%)" }} />
+      <span className="label-section">{label}</span>
     </div>
   );
 }

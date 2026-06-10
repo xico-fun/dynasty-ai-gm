@@ -28,7 +28,7 @@ export default function RootLayout({
       <body className="flex h-full min-h-screen"
         style={{ background: "var(--background)", color: "var(--foreground)" }}>
         <Sidebar />
-        <main className="flex-1 overflow-auto">
+        <main className="flex-1 overflow-auto animate-fade-in">
           {children}
         </main>
         <QuickAsk />

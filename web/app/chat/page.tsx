@@ -110,14 +110,14 @@ const MD: React.ComponentProps<typeof ReactMarkdown>["components"] = {
   th: ({ children }) => (
     <th
       className="text-left px-3 py-1.5 font-semibold border-b"
-      style={{ borderColor: "var(--border)", color: "var(--muted)" }}>
+      style={{ borderColor: "rgba(255,255,255,0.05)", color: "var(--muted)" }}>
       {children}
     </th>
   ),
   td: ({ children }) => (
     <td
       className="px-3 py-1.5 border-b"
-      style={{ borderColor: "var(--border)" }}>
+      style={{ borderColor: "rgba(255,255,255,0.05)" }}>
       {children}
     </td>
   ),
@@ -129,7 +129,7 @@ const MD: React.ComponentProps<typeof ReactMarkdown>["components"] = {
     </blockquote>
   ),
   hr: () => (
-    <hr className="my-2" style={{ borderColor: "var(--border)" }} />
+    <hr className="my-2" style={{ borderColor: "rgba(255,255,255,0.05)" }} />
   ),
 };
 
@@ -342,19 +342,18 @@ export default function ChatPage() {
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex h-screen overflow-hidden">
+    <div className="flex h-screen overflow-hidden animate-fade-in">
 
       {/* ── Thread history panel ─────────────────────────────────────────── */}
       <div className="w-56 flex flex-col border-r shrink-0"
-        style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
+        style={{ background: "rgba(10,12,18,0.9)", borderColor: "rgba(255,255,255,0.05)" }}>
 
         {/* Label */}
-        <div className="px-4 py-3 border-b shrink-0 flex items-center gap-2"
-          style={{ borderColor: "var(--border)" }}>
-          <span className="w-1 h-3 rounded-full shrink-0"
-            style={{ background: "var(--accent)" }} />
-          <span className="text-xs font-semibold uppercase tracking-wider"
-            style={{ color: "var(--muted)" }}>Recent Chats</span>
+        <div className="px-4 py-3 border-b shrink-0 flex items-center gap-2.5"
+          style={{ borderColor: "rgba(255,255,255,0.05)" }}>
+          <span className="w-[3px] h-3 rounded-full shrink-0"
+            style={{ background: "linear-gradient(180deg, var(--accent) 0%, rgba(34,197,94,0.2) 100%)" }} />
+          <span className="label-section">Recent Chats</span>
         </div>
 
         {/* Thread list */}
@@ -496,8 +495,8 @@ export default function ChatPage() {
         <div className="px-6 py-4 border-b shrink-0 flex items-center
           justify-between"
           style={{
-            borderColor: "var(--border)",
-            background: "var(--surface)",
+            borderColor: "rgba(255,255,255,0.05)",
+            background: "transparent",
           }}>
           <div>
             <h1 className="font-semibold">AI GM Chat</h1>
@@ -535,12 +534,8 @@ export default function ChatPage() {
                 ].map(q => (
                   <button key={q} onClick={() => setInput(q)}
                     className="text-xs text-left px-4 py-2 rounded-lg
-                      border transition-colors cursor-pointer"
-                    style={{
-                      borderColor: "var(--border)",
-                      color: "var(--muted)",
-                      background: "var(--surface)",
-                    }}>
+                      transition-colors cursor-pointer card-inner"
+                    style={{ color: "var(--muted)" }}>
                     {q}
                   </button>
                 ))}
@@ -553,15 +548,19 @@ export default function ChatPage() {
               className={`flex ${msg.role === "user"
                 ? "justify-end" : "justify-start"}`}>
               <div
-                className="max-w-[75%] rounded-2xl px-4 py-3 text-sm"
-                style={{
-                  background: msg.role === "user"
-                    ? "var(--accent)" : "var(--surface)",
-                  color: msg.role === "user"
-                    ? "#fff" : "var(--foreground)",
-                  borderRadius: msg.role === "user"
-                    ? "1rem 1rem 0.25rem 1rem"
-                    : "1rem 1rem 1rem 0.25rem",
+                className="max-w-[75%] px-4 py-3 text-sm"
+                style={msg.role === "user" ? {
+                  background: "rgba(34,197,94,0.08)",
+                  color: "var(--foreground)",
+                  border: "1px solid rgba(34,197,94,0.35)",
+                  boxShadow: "0 0 16px rgba(34,197,94,0.12), inset 0 1px 0 rgba(34,197,94,0.15)",
+                  borderRadius: "1rem 1rem 0.25rem 1rem",
+                } : {
+                  background: "rgba(255,255,255,0.03)",
+                  color: "var(--foreground)",
+                  border: "1px solid rgba(255,255,255,0.07)",
+                  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04)",
+                  borderRadius: "1rem 1rem 1rem 0.25rem",
                 }}>
                 {msg.role === "assistant" ? (
                   msg.content
@@ -588,8 +587,8 @@ export default function ChatPage() {
         {/* Input */}
         <div className="px-6 py-4 border-t"
           style={{
-            borderColor: "var(--border)",
-            background: "var(--surface)",
+            borderColor: "rgba(255,255,255,0.05)",
+            background: "rgba(10,12,18,0.85)",
           }}>
           <div className="flex gap-3">
             <input
