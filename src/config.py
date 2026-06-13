@@ -4,10 +4,14 @@ import os
 load_dotenv()
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-SLEEPER_USERNAME = os.getenv("SLEEPER_USERNAME")
-SLEEPER_LEAGUE_ID = os.getenv("SLEEPER_LEAGUE_ID")
 ODDS_API_KEY = os.getenv("ODDS_API_KEY")
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
+
+# Optional single-user fallback. In multi-user deployments the active league
+# and username arrive per-request from the database (forwarded as headers),
+# so these are no longer required — they only serve CLI / local single-user use.
+SLEEPER_USERNAME = os.getenv("SLEEPER_USERNAME")
+SLEEPER_LEAGUE_ID = os.getenv("SLEEPER_LEAGUE_ID")
 
 # LangSmith tracing (optional — set in .env to enable)
 LANGCHAIN_TRACING_V2 = os.getenv("LANGCHAIN_TRACING_V2", "false")
@@ -23,8 +27,6 @@ if LANGCHAIN_TRACING_V2.lower() == "true" and LANGCHAIN_API_KEY:
 MISSING = [
     name for name, val in {
         "ANTHROPIC_API_KEY": ANTHROPIC_API_KEY,
-        "SLEEPER_USERNAME": SLEEPER_USERNAME,
-        "SLEEPER_LEAGUE_ID": SLEEPER_LEAGUE_ID,
         "ODDS_API_KEY": ODDS_API_KEY,
         "TAVILY_API_KEY": TAVILY_API_KEY,
     }.items()
