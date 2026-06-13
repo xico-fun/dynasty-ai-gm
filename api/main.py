@@ -1,6 +1,7 @@
 """Dynasty AI GM — FastAPI backend."""
 import hashlib
 import json
+import os
 import uuid
 from pathlib import Path
 from typing import AsyncIterator
@@ -85,9 +86,17 @@ class ActiveLeagueMiddleware:
 
 app.add_middleware(ActiveLeagueMiddleware)
 
+# Comma-separated list of allowed origins. Defaults to the local Next.js dev
+# server; set ALLOWED_ORIGINS to the deployed frontend URL(s) in production.
+_allowed_origins = [
+    o.strip()
+    for o in os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",")
+    if o.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # Next.js dev server
+    allow_origins=_allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
