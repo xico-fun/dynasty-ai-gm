@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { streamChat, type Message } from "@/lib/api";
 import {
@@ -135,6 +135,15 @@ const MD: React.ComponentProps<typeof ReactMarkdown>["components"] = {
 // ── Main page ──────────────────────────────────────────────────────────────────
 
 export default function ChatPage() {
+  // useSearchParams() requires a Suspense boundary for static prerendering.
+  return (
+    <Suspense fallback={null}>
+      <ChatPageInner />
+    </Suspense>
+  );
+}
+
+function ChatPageInner() {
   const searchParams = useSearchParams();
 
   const [threads, setThreads] = useState<ThreadMeta[]>([]);
