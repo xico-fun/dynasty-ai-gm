@@ -1,8 +1,9 @@
 "use client";
 
+import { apiFetch } from "@/lib/api";
+
 import { useEffect, useState } from "react";
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -110,7 +111,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (dashOk()) return;
-    fetch(`${API}/dashboard`)
+    apiFetch(`/dashboard`)
       .then(r => { if (!r.ok) throw new Error(); return r.json(); })
       .then(d => {
         setData(d); _dc.data = d; _dc.ts = Date.now();
@@ -125,7 +126,7 @@ export default function Dashboard() {
 
   function fetchPreview() {
     setPreview({ status: "loading" });
-    fetch(`${API}/matchup-preview`)
+    apiFetch(`/matchup-preview`)
       .then(r => r.json())
       .then(p => {
         if (p.preview?.prediction) {
@@ -140,7 +141,7 @@ export default function Dashboard() {
 
   function fetchSpotlight() {
     setSpotlight({ status: "loading" });
-    fetch(`${API}/matchup-spotlight`)
+    apiFetch(`/matchup-spotlight`)
       .then(r => r.json())
       .then(s => {
         const players = s.spotlight?.players;
@@ -157,7 +158,7 @@ export default function Dashboard() {
   function fetchStartSit() {
     if (startSit.status !== "idle") return;
     setStartSit({ status: "loading" });
-    fetch(`${API}/matchup-startsit`)
+    apiFetch(`/matchup-startsit`)
       .then(r => r.json())
       .then(d => setStartSit({
         status: "done",
@@ -170,7 +171,7 @@ export default function Dashboard() {
   function fetchInjuries() {
     if (injuries.status !== "idle") return;
     setInjuries({ status: "loading" });
-    fetch(`${API}/matchup-injuries`)
+    apiFetch(`/matchup-injuries`)
       .then(r => r.json())
       .then(d => setInjuries({ status: "done", players: d.players ?? [] }))
       .catch(() => setInjuries({ status: "idle" }));
@@ -186,7 +187,7 @@ export default function Dashboard() {
     setRegenerating(true);
     _dc.preview = { status: "idle" }; _dc.ts = 0;
     try {
-      const r = await fetch(`${API}/matchup-preview/regenerate`, { method: "POST" });
+      const r = await apiFetch(`/matchup-preview/regenerate`, { method: "POST" });
       const p = await r.json();
       if (p.preview?.prediction) {
         const next: PreviewState = { status: "done", data: p.preview, lineupChanged: false };

@@ -1,5 +1,7 @@
 "use client";
 
+import { apiFetch } from "@/lib/api";
+
 import { useEffect, useState } from "react";
 import { ChevronDown, ChevronUp, Zap, Eye, ExternalLink } from "lucide-react";
 
@@ -12,7 +14,6 @@ function renderBold(text: string) {
   );
 }
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -83,12 +84,12 @@ export default function TeamPage() {
 
   useEffect(() => {
     if (cacheOk()) return;
-    fetch(`${API}/team/roster`)
+    apiFetch(`/team/roster`)
       .then(r => r.json())
       .then(d => { setRoster(d); setLoading(false); _c.roster = d; _c.ts = Date.now(); })
       .catch(() => setLoading(false));
-    fetch(`${API}/team/news`).then(r => r.json()).then(d => { setNews(d); _c.news = d; }).catch(() => {});
-    fetch(`${API}/team/trending`)
+    apiFetch(`/team/news`).then(r => r.json()).then(d => { setNews(d); _c.news = d; }).catch(() => {});
+    apiFetch(`/team/trending`)
       .then(r => r.json())
       .then(d => { const p = d.players ?? []; setTrending(p); _c.trending = p; })
       .catch(() => {});
@@ -99,7 +100,7 @@ export default function TeamPage() {
     setExpandedId(player.id);
     if (previews[player.id]) return;
     setLoadingId(player.id);
-    fetch(`${API}/team/player-preview/${player.id}`)
+    apiFetch(`/team/player-preview/${player.id}`)
       .then(r => r.json())
       .then(data => {
         setPreviews(p => { const n = { ...p, [player.id]: data }; _c.previews = n; return n; });

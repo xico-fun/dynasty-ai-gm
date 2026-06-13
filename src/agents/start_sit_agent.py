@@ -7,7 +7,7 @@ from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 
 from src.config import ANTHROPIC_API_KEY
 from src.tools.search_tools import search_player_news
-from src.strategy import STRATEGY_PREFIX
+from src.strategy import get_strategy_prefix
 from src.runtime_context import get_runtime_context
 
 _RESEARCH_SYSTEM = (
@@ -74,7 +74,7 @@ def generate_start_sit(
 
     messages: list = [
         SystemMessage(content=_RESEARCH_SYSTEM),
-        HumanMessage(content=f"{get_runtime_context()}{STRATEGY_PREFIX}\n\n{context}"),
+        HumanMessage(content=f"{get_runtime_context()}{get_strategy_prefix()}\n\n{context}"),
     ]
 
     for _ in range(8):

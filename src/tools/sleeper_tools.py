@@ -1,7 +1,7 @@
 """Sleeper API tools — fetches league, roster, and player data."""
 import httpx
 from langchain_core.tools import tool
-from src.config import SLEEPER_USERNAME, SLEEPER_LEAGUE_ID
+from src.active_league import get_active_league
 from src.tools import cache as _cache  # noqa: F401
 
 BASE_URL = "https://api.sleeper.app/v1"
@@ -37,40 +37,41 @@ def _player_name(player_id: str, players: dict) -> str:
 @tool
 def get_my_roster() -> dict:
     """Return the current user's roster from their Sleeper dynasty league."""
+    league = get_active_league()
     # Get all rosters in the league
-    rosters = _get(f"/league/{SLEEPER_LEAGUE_ID}/rosters")
+    rosters = _get(f"/league/{league.league_id}/rosters")
     # Get user ID from username
-    user = _get(f"/user/{SLEEPER_USERNAME}")
+    user = _get(f"/user/{league.username}")
     user_id = user["user_id"]
     # Match roster to user
     my_roster = next((r for r in rosters if r["owner_id"] == user_id), None)
     if not my_roster:
-        raise ValueError(f"No roster found for user {SLEEPER_USERNAME}")
+        raise ValueError(f"No roster found for user {league.username}")
     return my_roster
 
 
 @tool
 def get_all_rosters() -> list:
     """Return all rosters in the league (used for trade target analysis)."""
-    return _get(f"/league/{SLEEPER_LEAGUE_ID}/rosters")
+    return _get(f"/league/{get_active_league().league_id}/rosters")
 
 
 @tool
 def get_league_users() -> list:
     """Return all users/teams in the league."""
-    return _get(f"/league/{SLEEPER_LEAGUE_ID}/users")
+    return _get(f"/league/{get_active_league().league_id}/users")
 
 
 @tool
 def get_league_info() -> dict:
     """Return league settings and metadata."""
-    return _get(f"/league/{SLEEPER_LEAGUE_ID}")
+    return _get(f"/league/{get_active_league().league_id}")
 
 
 @tool
 def get_matchups(week: int) -> list:
     """Return matchup data for a given NFL week."""
-    return _get(f"/league/{SLEEPER_LEAGUE_ID}/matchups/{week}")
+    return _get(f"/league/{get_active_league().league_id}/matchups/{week}")
 
 
 @tool
@@ -87,15 +88,18 @@ def get_player_info(player_id: str) -> dict:
 
 def _build_enriched_rosters() -> list:
     """Internal helper — builds enriched roster list, shared by both tools."""
-    rosters = _cache.get("rosters")
-    if rosters is None:
-        rosters = _get(f"/league/{SLEEPER_LEAGUE_ID}/rosters")
-        _cache.set("rosters", rosters)
+    league_id = get_active_league().league_id
 
-    users = _cache.get("users")
+    # Cache keys are scoped per-league so multiple leagues never collide.
+    rosters = _cache.get(f"rosters:{league_id}")
+    if rosters is None:
+        rosters = _get(f"/league/{league_id}/rosters")
+        _cache.set(f"rosters:{league_id}", rosters)
+
+    users = _cache.get(f"users:{league_id}")
     if users is None:
-        users = _get(f"/league/{SLEEPER_LEAGUE_ID}/users")
-        _cache.set("users", users)
+        users = _get(f"/league/{league_id}/users")
+        _cache.set(f"users:{league_id}", users)
 
     players = _get_all_players()
     user_map = {u["user_id"]: u for u in users}
@@ -141,7 +145,8 @@ def get_my_roster_enriched() -> dict:
     Return the current user's roster with all player names resolved.
     Includes starters and bench with name, position, and NFL team.
     """
-    user = _get(f"/user/{SLEEPER_USERNAME}")
+    league = get_active_league()
+    user = _get(f"/user/{league.username}")
     my_user_id = user["user_id"]
     all_enriched = _build_enriched_rosters()
     match = next(
@@ -149,7 +154,7 @@ def get_my_roster_enriched() -> dict:
         None,
     )
     if not match:
-        raise ValueError(f"No roster found for user {SLEEPER_USERNAME}")
+        raise ValueError(f"No roster found for user {league.username}")
     return match
 
 

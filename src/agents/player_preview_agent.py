@@ -14,7 +14,7 @@ from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 
 from src.config import ANTHROPIC_API_KEY
 from src.tools.search_tools import search_player_news, search_dynasty_analysis
-from src.strategy import STRATEGY_PREFIX
+from src.strategy import get_strategy_prefix
 from src.runtime_context import get_runtime_context
 
 _RESEARCH_SYSTEM = """\
@@ -150,7 +150,7 @@ def generate_player_preview(
     messages: list = [
         SystemMessage(content=research_system),
         HumanMessage(content=(
-            f"{get_runtime_context()}{STRATEGY_PREFIX}\n\n"
+            f"{get_runtime_context()}{get_strategy_prefix()}\n\n"
             f"Research {name} ({position}, {team}) now. "
             "Stop when you have the data you need."
         )),

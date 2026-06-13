@@ -15,7 +15,7 @@ from src.tools.search_tools import (
     get_trade_value,
     search_dynasty_analysis,
 )
-from src.strategy import STRATEGY_PREFIX
+from src.strategy import get_strategy_prefix
 from src.untouchables import get_untouchables_constraint
 from src.runtime_context import get_runtime_context
 
@@ -171,7 +171,7 @@ def generate_trade_proposals(
         SystemMessage(content=_RESEARCH_SYSTEM),
         HumanMessage(
             content=(
-                f"{get_runtime_context()}{STRATEGY_PREFIX}\n\n{context}\n\n"
+                f"{get_runtime_context()}{get_strategy_prefix()}\n\n{context}\n\n"
                 "Search KTC values and dynasty analysis for each "
                 "offered player before building proposals."
             )
@@ -261,7 +261,7 @@ def generate_trade_recommendations(
 
     messages: list = [
         SystemMessage(content=_REC_RESEARCH_SYSTEM),
-        HumanMessage(content=f"{get_runtime_context()}{STRATEGY_PREFIX}\n\n{context}"),
+        HumanMessage(content=f"{get_runtime_context()}{get_strategy_prefix()}\n\n{context}"),
     ]
 
     for _ in range(10):

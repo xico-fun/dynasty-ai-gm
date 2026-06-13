@@ -9,7 +9,6 @@ import {
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const LAST_THREAD_KEY = "dynasty_last_thread_id";
 
 const NEON = {
@@ -167,7 +166,7 @@ export default function ChatPage() {
 
   // Load thread list + restore last session
   useEffect(() => {
-    fetch(`${API}/threads`)
+    fetch(`/api/threads`)
       .then(r => r.json())
       .then(d => {
         const loaded: ThreadMeta[] = d.threads ?? [];
@@ -203,7 +202,7 @@ export default function ChatPage() {
     setRenamingId(null);
     localStorage.setItem(LAST_THREAD_KEY, threadId);
     try {
-      const r = await fetch(`${API}/thread/${threadId}/history`);
+      const r = await fetch(`/api/threads/${threadId}/history`);
       const d = await r.json();
       setMessages(d.messages ?? []);
     } catch {
@@ -226,7 +225,7 @@ export default function ChatPage() {
       [...prev.map(x => x.thread_id === t.thread_id ? updated : x)]
         .sort((a, b) => +b.starred - +a.starred)
     );
-    await fetch(`${API}/thread/${t.thread_id}`, {
+    await fetch(`/api/threads/${t.thread_id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -251,7 +250,7 @@ export default function ChatPage() {
       )
     );
     setRenamingId(null);
-    await fetch(`${API}/thread/${t.thread_id}`, {
+    await fetch(`/api/threads/${t.thread_id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -264,7 +263,7 @@ export default function ChatPage() {
   async function removeThread(t: ThreadMeta) {
     setThreads(prev => prev.filter(x => x.thread_id !== t.thread_id));
     if (activeThreadId === t.thread_id) newChat();
-    await fetch(`${API}/thread/${t.thread_id}`, { method: "DELETE" });
+    await fetch(`/api/threads/${t.thread_id}`, { method: "DELETE" });
   }
 
   // ── Send ──────────────────────────────────────────────────────────────────
@@ -302,7 +301,7 @@ export default function ChatPage() {
       }
 
       if (resolvedThreadId && assistantText) {
-        await fetch(`${API}/thread/${resolvedThreadId}/save`, {
+        await fetch(`/api/threads/${resolvedThreadId}/save`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({

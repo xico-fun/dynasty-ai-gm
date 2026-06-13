@@ -12,10 +12,6 @@ from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.memory import MemorySaver
 from pydantic import BaseModel
 
-from api.db import (
-    init_db, save_exchange, get_messages, list_threads,
-    set_thread_meta, delete_thread,
-)
 from src.agents.matchup_preview_agent import generate_matchup_preview
 from src.agents.matchup_spotlight_agent import (
     generate_spotlight,
@@ -24,6 +20,8 @@ from src.agents.matchup_spotlight_agent import (
 from src.agents.player_preview_agent import generate_player_preview
 from src.graph.dynasty_graph import _build_graph
 from src.tools.sleeper_tools import _build_enriched_rosters
+from src.active_league import ActiveLeague, set_active_league
+from src.strategy import set_strategy
 
 CACHE_DIR = Path(__file__).parent.parent / "cache"
 PREVIEW_CACHE = CACHE_DIR / "matchup_preview.json"
@@ -38,6 +36,55 @@ INJURIES_CACHE = CACHE_DIR / "matchup_injuries.json"
 
 app = FastAPI(title="Dynasty AI GM API")
 
+
+class ActiveLeagueMiddleware:
+    """Pure ASGI middleware that resolves the active league for each request.
+
+    The Next.js layer forwards the authenticated user's active league (resolved
+    server-side from their session) as headers. We read them here and stash an
+    ``ActiveLeague`` in a request-scoped ContextVar that the Sleeper tools read.
+    When the headers are absent (CLI/tests), the context falls back to ``.env``.
+
+    Implemented as pure ASGI rather than ``BaseHTTPMiddleware`` so the ContextVar
+    set here reliably propagates to sync endpoints (BaseHTTPMiddleware runs the
+    app in a separate task, which breaks ContextVar propagation).
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            headers = dict(scope.get("headers") or [])
+            league_id = headers.get(b"x-sleeper-league-id", b"").decode() or None
+            username = headers.get(b"x-sleeper-username", b"").decode() or None
+            sleeper_user_id = (
+                headers.get(b"x-sleeper-user-id", b"").decode() or None
+            )
+            if league_id and username:
+                set_active_league(
+                    ActiveLeague(league_id, username, sleeper_user_id)
+                )
+            else:
+                set_active_league(None)  # fall back to .env
+
+            # Strategy is base64-encoded (it's multi-line free text).
+            raw_strategy = headers.get(b"x-user-strategy", b"").decode()
+            if raw_strategy:
+                import base64
+                try:
+                    set_strategy(
+                        base64.b64decode(raw_strategy).decode("utf-8")
+                    )
+                except Exception:
+                    set_strategy(None)
+            else:
+                set_strategy(None)  # fall back to my_strategy.md
+        await self.app(scope, receive, send)
+
+
+app.add_middleware(ActiveLeagueMiddleware)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000"],  # Next.js dev server
@@ -45,8 +92,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-init_db()
 
 # Single shared graph instance with in-memory checkpointing
 _graph = _build_graph(checkpointer=MemorySaver())
@@ -211,7 +256,9 @@ def _calc_streaks(
 def get_dashboard():
     """Return all data needed to render the dashboard page."""
     from src.tools.sleeper_tools import _get, _get_all_players, _player_name
-    from src.config import SLEEPER_USERNAME, SLEEPER_LEAGUE_ID
+    from src.active_league import get_active_league
+    _lg = get_active_league()
+    SLEEPER_USERNAME, SLEEPER_LEAGUE_ID = _lg.username, _lg.league_id
 
     user = _get(f"/user/{SLEEPER_USERNAME}")
     user_id = user["user_id"]
@@ -408,7 +455,9 @@ def get_dashboard():
 def get_matchup_preview():
     """Return cached matchup preview, generating it if needed."""
     from src.tools.sleeper_tools import _get, _get_all_players
-    from src.config import SLEEPER_USERNAME, SLEEPER_LEAGUE_ID
+    from src.active_league import get_active_league
+    _lg = get_active_league()
+    SLEEPER_USERNAME, SLEEPER_LEAGUE_ID = _lg.username, _lg.league_id
 
     # We need the current matchup data to check the starters hash
     nfl_state = _get("/state/nfl")
@@ -602,7 +651,9 @@ def regenerate_matchup_preview():
 def get_matchup_spotlight():
     """Return cached spotlight, generating it if needed."""
     from src.tools.sleeper_tools import _get, _get_all_players
-    from src.config import SLEEPER_USERNAME, SLEEPER_LEAGUE_ID
+    from src.active_league import get_active_league
+    _lg = get_active_league()
+    SLEEPER_USERNAME, SLEEPER_LEAGUE_ID = _lg.username, _lg.league_id
 
     nfl_state = _get("/state/nfl")
     week = nfl_state.get("week") or 1
@@ -737,7 +788,9 @@ def get_matchup_startsit():
 
     d = _my_roster_data() if False else None  # resolved below
     from src.tools.sleeper_tools import _get, _get_all_players
-    from src.config import SLEEPER_USERNAME, SLEEPER_LEAGUE_ID
+    from src.active_league import get_active_league
+    _lg = get_active_league()
+    SLEEPER_USERNAME, SLEEPER_LEAGUE_ID = _lg.username, _lg.league_id
 
     nfl_state = _get("/state/nfl")
     week = nfl_state.get("week") or 1
@@ -917,7 +970,9 @@ def get_matchup_injuries():
 def _my_roster_data():
     """Shared helper — returns nfl_state + my full structured roster."""
     from src.tools.sleeper_tools import _get, _get_all_players
-    from src.config import SLEEPER_USERNAME, SLEEPER_LEAGUE_ID
+    from src.active_league import get_active_league
+    _lg = get_active_league()
+    SLEEPER_USERNAME, SLEEPER_LEAGUE_ID = _lg.username, _lg.league_id
 
     nfl_state = _get("/state/nfl")
     week = nfl_state.get("week") or 1
@@ -1098,7 +1153,8 @@ def get_team_trending():
     Each player is flagged 'waiver_add' (free agent) or 'trade' (rostered).
     """
     from src.tools.sleeper_tools import _get, _get_all_players
-    from src.config import SLEEPER_LEAGUE_ID
+    from src.active_league import get_active_league
+    SLEEPER_LEAGUE_ID = get_active_league().league_id
 
     # Trending adds from Sleeper — 5 days lookback, top 10
     trending_raw = _get(
@@ -1177,7 +1233,9 @@ def get_player_preview(player_id: str):
     if season_type == "regular":
         try:
             from src.tools.sleeper_tools import _get
-            from src.config import SLEEPER_LEAGUE_ID, SLEEPER_USERNAME
+            from src.active_league import get_active_league
+            _lg = get_active_league()
+            SLEEPER_USERNAME, SLEEPER_LEAGUE_ID = _lg.username, _lg.league_id
             user_data = _get(f"/user/{SLEEPER_USERNAME}")
             rosters = _get(f"/league/{SLEEPER_LEAGUE_ID}/rosters")
             users_list = _get(f"/league/{SLEEPER_LEAGUE_ID}/users")
@@ -1239,7 +1297,9 @@ class TradeFindRequest(BaseModel):
 def get_trades_roster():
     """My roster by position + tradeable picks for the Trade Center."""
     from src.tools.sleeper_tools import _get
-    from src.config import SLEEPER_USERNAME, SLEEPER_LEAGUE_ID
+    from src.active_league import get_active_league
+    _lg = get_active_league()
+    SLEEPER_USERNAME, SLEEPER_LEAGUE_ID = _lg.username, _lg.league_id
 
     d = _my_roster_data()
     all_players = d["starters"] + d["bench"]
@@ -1329,7 +1389,8 @@ def get_trades_roster():
 def find_trades(req: TradeFindRequest):
     """AI trade finder — given offered players/picks, return 3 proposals."""
     from src.tools.sleeper_tools import _get, _get_all_players
-    from src.config import SLEEPER_LEAGUE_ID
+    from src.active_league import get_active_league
+    SLEEPER_LEAGUE_ID = get_active_league().league_id
     from src.agents.trade_finder_agent import generate_trade_proposals
 
     if not req.player_ids and not req.pick_ids:
@@ -1485,48 +1546,7 @@ def get_trades_recommendations():
     TRADE_RECS_CACHE.write_text(json.dumps({"cache_key": ck, "content": content}))
     return content
 
-
-class SaveRequest(BaseModel):
-    user_message: str
-    assistant_message: str
-
-
-@app.post("/thread/{thread_id}/save")
-def save_thread_exchange(thread_id: str, req: SaveRequest):
-    """Persist a user/assistant exchange to SQLite after streaming."""
-    save_exchange(thread_id, req.user_message, req.assistant_message)
-    return {"ok": True}
-
-
-@app.get("/threads")
-def get_threads():
-    """List recent threads for the history panel."""
-    return {"threads": list_threads(limit=30)}
-
-
-class ThreadPatchRequest(BaseModel):
-    starred: bool
-    custom_title: str | None = None
-
-
-@app.patch("/thread/{thread_id}")
-def patch_thread(thread_id: str, req: ThreadPatchRequest):
-    """Update starred / custom title for a thread."""
-    set_thread_meta(thread_id, req.starred, req.custom_title)
-    return {"ok": True}
-
-
-@app.delete("/thread/{thread_id}")
-def delete_thread_endpoint(thread_id: str):
-    """Delete all messages and metadata for a thread."""
-    delete_thread(thread_id)
-    return {"ok": True}
-
-
-@app.get("/thread/{thread_id}/history")
-def get_thread_history(thread_id: str):
-    """Return persisted message history for a thread."""
-    return {
-        "thread_id": thread_id,
-        "messages": get_messages(thread_id),
-    }
+# NOTE: Chat persistence (threads + messages) lives in the Next.js layer now,
+# backed by Postgres and scoped to the authenticated user + active league.
+# See web/app/api/threads/*. FastAPI only handles chat *generation* via
+# /chat and /chat/stream; it no longer stores chat history.

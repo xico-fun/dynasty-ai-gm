@@ -1,9 +1,10 @@
 "use client";
 
+import { apiFetch } from "@/lib/api";
+
 import { useEffect, useState } from "react";
 import { Loader2, X, Zap, Calendar } from "lucide-react";
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -93,17 +94,17 @@ export default function TradesPage() {
   const [activeProposal, setActiveProposal] = useState(0);
 
   useEffect(() => {
-    fetch(`${API}/trades/roster`)
+    apiFetch(`/trades/roster`)
       .then(r => r.json())
       .then(d => { setRosterData(d); setLoading(false); })
       .catch(() => setLoading(false));
 
-    fetch(`${API}/trades/trending-values`)
+    apiFetch(`/trades/trending-values`)
       .then(r => r.json())
       .then(d => setTrendingValues(d.players ?? []))
       .catch(() => setTrendingValues([]));
 
-    fetch(`${API}/trades/recommendations`)
+    apiFetch(`/trades/recommendations`)
       .then(r => r.json())
       .then(d => setRecommendations(d.recommendations ?? []))
       .catch(() => setRecommendations([]));
@@ -133,7 +134,7 @@ export default function TradesPage() {
     setProposals(null);
 
     try {
-      const r = await fetch(`${API}/trades/find`, {
+      const r = await apiFetch(`/trades/find`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ player_ids: playerIds, pick_ids: pickIds }),

@@ -29,7 +29,7 @@ from src.config import ANTHROPIC_API_KEY
 from src.league_context import LEAGUE_CONTEXT_PREFIX
 from src.runtime_context import get_runtime_context
 from src.style_guide import STYLE_GUIDE
-from src.strategy import STRATEGY_PREFIX
+from src.strategy import get_strategy_prefix
 
 SPECIALISTS = ("matchup", "trade", "waiver", "general")
 
@@ -167,7 +167,10 @@ def _cached_system(static: str, dynamic: str = "") -> SystemMessage:
 def _make_agent_node(llm_with_tools, system_prompt: str):
     def node(state: DynastyState) -> dict:
         messages = [
-            _cached_system(system_prompt, dynamic=get_runtime_context())
+            _cached_system(
+                system_prompt,
+                dynamic=get_strategy_prefix() + get_runtime_context(),
+            )
         ] + state["messages"]
         response = llm_with_tools.invoke(messages)
         return {"messages": [response]}
@@ -254,9 +257,10 @@ def _build_graph(checkpointer=None):
     tool_node = ToolNode(all_tools)
 
     def general_node(state: DynastyState) -> dict:
-        static = LEAGUE_CONTEXT_PREFIX + STRATEGY_PREFIX + STYLE_GUIDE
+        static = LEAGUE_CONTEXT_PREFIX + STYLE_GUIDE
         dynamic = (
-            get_runtime_context()
+            get_strategy_prefix()
+            + get_runtime_context()
             + "\n## Your Role\n"
             "You are a dynasty fantasy football assistant. "
             "Answer directly and concisely."

@@ -11,9 +11,8 @@ from src.tools.search_tools import search_player_news, search_dynasty_analysis
 from src.config import ANTHROPIC_API_KEY
 from src.league_context import LEAGUE_CONTEXT_PREFIX
 from src.style_guide import STYLE_GUIDE
-from src.strategy import STRATEGY_PREFIX
 
-SYSTEM_PROMPT = LEAGUE_CONTEXT_PREFIX + STRATEGY_PREFIX + STYLE_GUIDE + """
+SYSTEM_PROMPT = LEAGUE_CONTEXT_PREFIX + STYLE_GUIDE + """
 ## Your Role
 You are a dynasty fantasy football start/sit analyst.
 

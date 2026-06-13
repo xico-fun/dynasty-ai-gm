@@ -15,7 +15,7 @@ from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 
 from src.config import ANTHROPIC_API_KEY
 from src.tools.search_tools import search_player_news
-from src.strategy import STRATEGY_PREFIX
+from src.strategy import get_strategy_prefix
 from src.runtime_context import get_runtime_context
 
 # ── System prompts ────────────────────────────────────────────────────────────
@@ -140,7 +140,7 @@ def generate_spotlight(matchup: dict, season_type: str) -> dict:
     messages: list = [
         SystemMessage(content=_RESEARCH_SYSTEM.format(period=period)),
         HumanMessage(content=(
-            f"{get_runtime_context()}{STRATEGY_PREFIX}\n\n{context}\n\n"
+            f"{get_runtime_context()}{get_strategy_prefix()}\n\n{context}\n\n"
             "Search the players you need prop/projection data on, "
             "then stop — a follow-up will ask you to write the spotlight."
         )),
