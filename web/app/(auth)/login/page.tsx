@@ -9,6 +9,7 @@ export default function LoginPage() {
   const router = useRouter()
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
+  const [keepSignedIn, setKeepSignedIn] = useState(true)
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
 
@@ -23,13 +24,21 @@ export default function LoginPage() {
       redirect: false,
     })
 
-    setLoading(false)
-
     if (res?.error) {
+      setLoading(false)
       setError("Invalid email or password.")
-    } else {
-      router.push("/")
+      return
     }
+
+    // Apply the session-persistence choice before navigating.
+    await fetch("/api/auth/remember", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ remember: keepSignedIn }),
+    }).catch(() => {})
+
+    setLoading(false)
+    router.push("/")
   }
 
   return (
@@ -95,7 +104,17 @@ export default function LoginPage() {
           </p>
         )}
 
-        <div className="text-right -mt-1">
+        <div className="flex items-center justify-between -mt-1">
+          <label className="flex items-center gap-2 text-xs cursor-pointer select-none" style={{ color: "var(--muted)" }}>
+            <input
+              type="checkbox"
+              checked={keepSignedIn}
+              onChange={(e) => setKeepSignedIn(e.target.checked)}
+              className="cursor-pointer"
+              style={{ accentColor: "var(--accent)" }}
+            />
+            Keep me signed in
+          </label>
           <Link href="/forgot-password" className="text-xs" style={{ color: "var(--muted)" }}>
             Forgot password?
           </Link>

@@ -34,7 +34,10 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       },
     }),
   ],
-  session: { strategy: "jwt" },
+  // 30-day persistent session by default ("keep me signed in"). When a user
+  // unchecks that at login, the session cookie is converted to a browser-only
+  // cookie via /api/auth/remember.
+  session: { strategy: "jwt", maxAge: 30 * 24 * 60 * 60 },
   pages: {
     signIn: "/login",
   },
