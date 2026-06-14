@@ -1,24 +1,21 @@
-"""Per-user, weekly file cache for expensive AI-generated feature content.
+"""Durable per-user, weekly cache for expensive AI-generated feature content.
 
-The original cache stored a single ``{cache_key, content}`` slot per feature in
-one file — fine for a single user, but in multi-user it meant one user's cached
-content overwrote (or, worse, was served to) another's.
+Backed by Postgres (Supabase) so it survives Railway container restarts and
+deploys — the previous file-on-disk version was wiped whenever the container
+cycled. Entries are keyed by league + Sleeper user + week, so each user gets
+their own cache that refreshes when the NFL week rolls over.
 
-This stores a dict of ``{key: content}`` per feature file, where the key is
-scoped to the active league + Sleeper user + week. Different users therefore
-get their own entries, and everything naturally refreshes once the NFL week
-rolls over. Storage is the Railway container's ephemeral disk, which is fine —
-it simply rebuilds after a redeploy.
+All operations degrade gracefully: if the database is unreachable, reads return
+None (cache miss → regenerate) and writes are skipped, so features keep working.
 """
 import json
-from pathlib import Path
+import os
+from urllib.parse import urlparse
+
+import psycopg2
+from psycopg2.extras import Json
 
 from src.active_league import get_active_league
-
-CACHE_DIR = Path(__file__).parent.parent / "cache"
-
-# Keep each feature file from growing without bound across many weeks/users.
-_MAX_ENTRIES = 200
 
 
 def user_week_key(season, week, *extra) -> str:
@@ -34,41 +31,82 @@ def user_week_key(season, week, *extra) -> str:
     return ":".join(parts)
 
 
-def _path(name: str) -> Path:
-    return CACHE_DIR / f"{name}.json"
+def _conn():
+    # Parse the DSN into parts rather than passing the URL directly: the
+    # Supabase password contains a literal '%', which libpq's URI parser would
+    # try to percent-decode.
+    u = urlparse(os.getenv("DATABASE_URL", ""))
+    return psycopg2.connect(
+        host=u.hostname,
+        port=u.port or 5432,
+        user=u.username,
+        password=u.password,
+        dbname=(u.path or "/postgres").lstrip("/") or "postgres",
+        sslmode="require",
+        connect_timeout=5,
+    )
 
 
-def _load(name: str) -> dict:
-    f = _path(name)
-    if not f.exists():
-        return {}
-    try:
-        data = json.loads(f.read_text())
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
+def _full_key(name: str, key: str) -> str:
+    return f"{name}:{key}"
 
 
 def get(name: str, key: str):
     """Return cached content for ``key`` in feature ``name``, or None."""
-    return _load(name).get(key)
-
-
-def delete(name: str, key: str) -> None:
-    """Remove a single cached entry (used to force regeneration)."""
-    store = _load(name)
-    if key in store:
-        store.pop(key, None)
-        _path(name).write_text(json.dumps(store))
+    conn = None
+    try:
+        conn = _conn()
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT content FROM feature_cache WHERE key = %s",
+                (_full_key(name, key),),
+            )
+            row = cur.fetchone()
+        if not row:
+            return None
+        val = row[0]
+        return json.loads(val) if isinstance(val, str) else val
+    except Exception:
+        return None
+    finally:
+        if conn:
+            conn.close()
 
 
 def set(name: str, key: str, content) -> None:
     """Store ``content`` under ``key`` for feature ``name``."""
-    CACHE_DIR.mkdir(exist_ok=True)
-    store = _load(name)
-    store[key] = content
-    # Simple bound: if we exceed the cap, drop the oldest insertion-order keys.
-    if len(store) > _MAX_ENTRIES:
-        for old in list(store.keys())[: len(store) - _MAX_ENTRIES]:
-            store.pop(old, None)
-    _path(name).write_text(json.dumps(store))
+    conn = None
+    try:
+        conn = _conn()
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO feature_cache (key, content, updated_at) "
+                "VALUES (%s, %s, now()) "
+                "ON CONFLICT (key) DO UPDATE SET "
+                "content = EXCLUDED.content, updated_at = now()",
+                (_full_key(name, key), Json(content)),
+            )
+        conn.commit()
+    except Exception:
+        pass
+    finally:
+        if conn:
+            conn.close()
+
+
+def delete(name: str, key: str) -> None:
+    """Remove a single cached entry (used to force regeneration)."""
+    conn = None
+    try:
+        conn = _conn()
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM feature_cache WHERE key = %s",
+                (_full_key(name, key),),
+            )
+        conn.commit()
+    except Exception:
+        pass
+    finally:
+        if conn:
+            conn.close()
