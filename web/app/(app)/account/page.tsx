@@ -130,11 +130,19 @@ export default function AccountPage() {
         </div>
         <button
           onClick={() => signOut({ callbackUrl: "/login" })}
-          className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all"
+          className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium cursor-pointer transition-all"
           style={{
             background: "rgba(255,255,255,0.05)",
             border: "1px solid rgba(255,255,255,0.1)",
             color: "var(--foreground)",
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = "rgba(255,255,255,0.1)"
+            e.currentTarget.style.borderColor = "rgba(255,255,255,0.2)"
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = "rgba(255,255,255,0.05)"
+            e.currentTarget.style.borderColor = "rgba(255,255,255,0.1)"
           }}
         >
           <LogOut size={15} /> Sign out
