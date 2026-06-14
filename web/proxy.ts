@@ -26,13 +26,16 @@ export async function proxy(req: NextRequest) {
   })
 
   const isLoggedIn = !!token
-  const isAuthPage = pathname === "/login" || pathname === "/signup"
+  // Public (unauthenticated) pages.
+  const publicPages = ["/login", "/signup", "/forgot-password", "/reset-password"]
+  const isPublicPage = publicPages.includes(pathname)
 
-  if (!isLoggedIn && !isAuthPage) {
+  if (!isLoggedIn && !isPublicPage) {
     return NextResponse.redirect(new URL("/login", req.url))
   }
 
-  if (isLoggedIn && isAuthPage) {
+  // Keep logged-in users out of login/signup, but allow password pages.
+  if (isLoggedIn && (pathname === "/login" || pathname === "/signup")) {
     return NextResponse.redirect(new URL("/", req.url))
   }
 

@@ -58,6 +58,16 @@ export default function AccountPage() {
   const [record, setRecord] = useState<string>("—")
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const [deleteText, setDeleteText] = useState("")
+  const [deleting, setDeleting] = useState(false)
+
+  async function deleteAccount() {
+    setDeleting(true)
+    await fetch("/api/me/account", { method: "DELETE" })
+    // Sign out clears the session, then land on signup.
+    await signOut({ callbackUrl: "/signup" })
+  }
 
   useEffect(() => {
     fetch("/api/me/profile")
@@ -337,6 +347,65 @@ export default function AccountPage() {
             </div>
           ))}
         </div>
+      </div>
+
+      {/* Danger zone */}
+      <div
+        className="rounded-2xl p-6 mt-6"
+        style={{ background: "rgba(239,68,68,0.04)", border: "1px solid rgba(239,68,68,0.2)" }}
+      >
+        <h2 className="text-base font-semibold mb-1" style={{ color: "var(--danger)" }}>
+          Delete account
+        </h2>
+        <p className="text-xs mb-4" style={{ color: "var(--muted)" }}>
+          Permanently deletes your account, strategy, and chat history. Your league
+          stays intact for other members. This can&apos;t be undone.
+        </p>
+
+        {!confirmingDelete ? (
+          <button
+            onClick={() => setConfirmingDelete(true)}
+            className="rounded-lg px-4 py-2 text-sm font-medium transition-all"
+            style={{ background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.35)", color: "var(--danger)" }}
+          >
+            Delete my account
+          </button>
+        ) : (
+          <div className="flex flex-col gap-3">
+            <p className="text-xs" style={{ color: "var(--muted-bright)" }}>
+              Type <strong style={{ color: "var(--danger)" }}>DELETE</strong> to confirm.
+            </p>
+            <input
+              type="text"
+              value={deleteText}
+              onChange={(e) => setDeleteText(e.target.value)}
+              placeholder="DELETE"
+              className="w-full max-w-xs rounded-lg px-3 py-2 text-sm outline-none"
+              style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(239,68,68,0.3)", color: "var(--foreground)" }}
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={() => { setConfirmingDelete(false); setDeleteText("") }}
+                className="rounded-lg px-4 py-2 text-sm font-medium"
+                style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", color: "var(--foreground)" }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={deleteAccount}
+                disabled={deleteText !== "DELETE" || deleting}
+                className="rounded-lg px-4 py-2 text-sm font-medium transition-all"
+                style={{
+                  background: deleteText === "DELETE" && !deleting ? "var(--danger)" : "rgba(239,68,68,0.25)",
+                  color: deleteText === "DELETE" && !deleting ? "#fff" : "rgba(255,255,255,0.5)",
+                  cursor: deleteText === "DELETE" && !deleting ? "pointer" : "not-allowed",
+                }}
+              >
+                {deleting ? "Deleting…" : "Permanently delete"}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
