@@ -14,26 +14,19 @@ from langgraph.checkpoint.memory import MemorySaver
 from pydantic import BaseModel
 
 from src.agents.matchup_preview_agent import generate_matchup_preview
-from src.agents.matchup_spotlight_agent import (
-    generate_spotlight,
-    cache_key as spotlight_cache_key,
-)
+from src.agents.matchup_spotlight_agent import generate_spotlight
 from src.agents.player_preview_agent import generate_player_preview
 from src.graph.dynasty_graph import _build_graph
 from src.tools.sleeper_tools import _build_enriched_rosters
 from src.active_league import ActiveLeague, set_active_league
 from src.strategy import set_strategy
+from api import feature_cache
 
 CACHE_DIR = Path(__file__).parent.parent / "cache"
-PREVIEW_CACHE = CACHE_DIR / "matchup_preview.json"
-SPOTLIGHT_CACHE = CACHE_DIR / "matchup_spotlight.json"
+# Per-user weekly feature caches now live in api/feature_cache.py. The two
+# below are still single-slot caches for league-wide team content.
 TEAM_NEWS_CACHE = CACHE_DIR / "team_news.json"
 TEAM_WAIVER_CACHE = CACHE_DIR / "team_waiver_adds.json"
-PLAYER_PREVIEW_DIR = CACHE_DIR / "player_previews"
-TRADE_TRENDING_CACHE = CACHE_DIR / "trade_trending.json"
-TRADE_RECS_CACHE = CACHE_DIR / "trade_recs.json"
-START_SIT_CACHE = CACHE_DIR / "matchup_startsit.json"
-INJURIES_CACHE = CACHE_DIR / "matchup_injuries.json"
 
 app = FastAPI(title="Dynasty AI GM API")
 
@@ -474,13 +467,9 @@ def get_matchup_preview():
     season = nfl_state.get("season", "2026")
     season_type = nfl_state.get("season_type", "off")
 
-    # Load cache
-    cached = None
-    if PREVIEW_CACHE.exists():
-        try:
-            cached = json.loads(PREVIEW_CACHE.read_text())
-        except Exception:
-            cached = None
+    # Per-user, weekly cache
+    cache_key = feature_cache.user_week_key(season, week)
+    cached = feature_cache.get("matchup_preview", cache_key)
 
     # We need the matchup to get the current starters hash
     # Re-use the dashboard matchup logic in minimal form
@@ -637,22 +626,24 @@ def get_matchup_preview():
 
     # No valid cache — generate
     content = generate_matchup_preview(matchup_raw, season_type)
-    CACHE_DIR.mkdir(exist_ok=True)
-    PREVIEW_CACHE.write_text(json.dumps({
+    feature_cache.set("matchup_preview", cache_key, {
         "week": week,
         "season": season,
         "starters_hash": current_hash,
         "content": content,
-    }))
+    })
     return {"preview": content, "lineup_changed": False, "cached": False}
 
 
 @app.post("/matchup-preview/regenerate")
 def regenerate_matchup_preview():
-    """Force-regenerate the matchup preview and update the cache."""
-    # Delete cache and re-use get logic
-    if PREVIEW_CACHE.exists():
-        PREVIEW_CACHE.unlink()
+    """Force-regenerate the matchup preview for the active user."""
+    from src.tools.sleeper_tools import _get
+    nfl_state = _get("/state/nfl")
+    week = nfl_state.get("week") or 1
+    season = nfl_state.get("season", "2026")
+    # Clear only this user's cached entry, then re-run the normal logic.
+    feature_cache.delete("matchup_preview", feature_cache.user_week_key(season, week))
     return get_matchup_preview()
 
 
@@ -669,18 +660,10 @@ def get_matchup_spotlight():
     season = nfl_state.get("season", "2026")
     season_type = nfl_state.get("season_type", "off")
 
-    ck = spotlight_cache_key(season, season_type, week)
-
-    # Load cache
-    cached = None
-    if SPOTLIGHT_CACHE.exists():
-        try:
-            cached = json.loads(SPOTLIGHT_CACHE.read_text())
-        except Exception:
-            cached = None
-
-    if cached and cached.get("cache_key") == ck:
-        return {"spotlight": cached["content"]}
+    cache_key = feature_cache.user_week_key(season, week, season_type)
+    cached = feature_cache.get("matchup_spotlight", cache_key)
+    if cached is not None:
+        return {"spotlight": cached}
 
     # Build matchup context (same pattern as preview endpoint)
     user = _get(f"/user/{SLEEPER_USERNAME}")
@@ -782,11 +765,7 @@ def get_matchup_spotlight():
         return {"spotlight": None}
 
     content = generate_spotlight(matchup_raw, season_type)
-    CACHE_DIR.mkdir(exist_ok=True)
-    SPOTLIGHT_CACHE.write_text(json.dumps({
-        "cache_key": ck,
-        "content": content,
-    }))
+    feature_cache.set("matchup_spotlight", cache_key, content)
     return {"spotlight": content}
 
 
@@ -805,22 +784,15 @@ def get_matchup_startsit():
     week = nfl_state.get("week") or 1
     season = nfl_state.get("season", "2026")
     season_type = nfl_state.get("season_type", "off")
-    ck = f"{season}_week{week}_ss"
+    cache_key = feature_cache.user_week_key(season, week, "ss")
 
-    if START_SIT_CACHE.exists():
-        try:
-            cached = json.loads(START_SIT_CACHE.read_text())
-            if cached.get("cache_key") == ck:
-                return cached["content"]
-        except Exception:
-            pass
+    cached = feature_cache.get("matchup_startsit", cache_key)
+    if cached is not None:
+        return cached
 
     if season_type != "regular":
         content = {"decisions": [], "offseason": True}
-        CACHE_DIR.mkdir(exist_ok=True)
-        START_SIT_CACHE.write_text(
-            json.dumps({"cache_key": ck, "content": content})
-        )
+        feature_cache.set("matchup_startsit", cache_key, content)
         return content
 
     user = _get(f"/user/{SLEEPER_USERNAME}")
@@ -898,10 +870,7 @@ def get_matchup_startsit():
     )
 
     content = {"decisions": decisions, "offseason": False}
-    CACHE_DIR.mkdir(exist_ok=True)
-    START_SIT_CACHE.write_text(
-        json.dumps({"cache_key": ck, "content": content})
-    )
+    feature_cache.set("matchup_startsit", cache_key, content)
     return content
 
 
@@ -914,15 +883,10 @@ def get_matchup_injuries():
     d = _my_roster_data()
     week = d["week"]
     season = d["season"]
-    ck = f"{season}_week{week}_inj"
-
-    if INJURIES_CACHE.exists():
-        try:
-            cached = json.loads(INJURIES_CACHE.read_text())
-            if cached.get("cache_key") == ck:
-                return cached["content"]
-        except Exception:
-            pass
+    cache_key = feature_cache.user_week_key(season, week, "inj")
+    cached = feature_cache.get("matchup_injuries", cache_key)
+    if cached is not None:
+        return cached
 
     # Pull injury status directly from Sleeper player DB
     all_players = _get_all_players()
@@ -944,10 +908,7 @@ def get_matchup_injuries():
 
     if not injured:
         content = {"players": []}
-        CACHE_DIR.mkdir(exist_ok=True)
-        INJURIES_CACHE.write_text(
-            json.dumps({"cache_key": ck, "content": content})
-        )
+        feature_cache.set("matchup_injuries", cache_key, content)
         return content
 
     # Only search news for players who are actually injured
@@ -969,10 +930,7 @@ def get_matchup_injuries():
         })
 
     content = {"players": results}
-    CACHE_DIR.mkdir(exist_ok=True)
-    INJURIES_CACHE.write_text(
-        json.dumps({"cache_key": ck, "content": content})
-    )
+    feature_cache.set("matchup_injuries", cache_key, content)
     return content
 
 
@@ -1221,15 +1179,10 @@ def get_player_preview(player_id: str):
     season = d["season"]
     season_type = d["season_type"]
 
-    suffix = f"week{week}" if season_type == "regular" else "off"
-    PLAYER_PREVIEW_DIR.mkdir(parents=True, exist_ok=True)
-    cache_file = PLAYER_PREVIEW_DIR / f"{player_id}_{season}_{suffix}.json"
-
-    if cache_file.exists():
-        try:
-            return json.loads(cache_file.read_text())
-        except Exception:
-            pass
+    cache_key = feature_cache.user_week_key(season, week, "player", player_id)
+    cached = feature_cache.get("player_preview", cache_key)
+    if cached is not None:
+        return cached
 
     # Find the player in our roster
     all_players = d["starters"] + d["bench"]
@@ -1293,7 +1246,7 @@ def get_player_preview(player_id: str):
         week=week,
         season=season,
     )
-    cache_file.write_text(json.dumps(result))
+    feature_cache.set("player_preview", cache_key, result)
     return result
 
 
@@ -1468,19 +1421,10 @@ def get_trades_trending_values():
     week = d["week"]
     season = d["season"]
     season_type = d["season_type"]
-    ck = (
-        f"{season}_week{week}_tv"
-        if season_type == "regular"
-        else f"{season}_off_tv"
-    )
-
-    if TRADE_TRENDING_CACHE.exists():
-        try:
-            cached = json.loads(TRADE_TRENDING_CACHE.read_text())
-            if cached.get("cache_key") == ck:
-                return cached["content"]
-        except Exception:
-            pass
+    cache_key = feature_cache.user_week_key(season, week, "tv")
+    cached = feature_cache.get("trade_trending", cache_key)
+    if cached is not None:
+        return cached
 
     skill = {"QB", "RB", "WR", "TE"}
     players = [p for p in d["starters"] if p["position"] in skill][:6]
@@ -1515,10 +1459,7 @@ def get_trades_trending_values():
     ]
 
     content = {"players": results}
-    CACHE_DIR.mkdir(exist_ok=True)
-    TRADE_TRENDING_CACHE.write_text(
-        json.dumps({"cache_key": ck, "content": content})
-    )
+    feature_cache.set("trade_trending", cache_key, content)
     return content
 
 
@@ -1531,19 +1472,10 @@ def get_trades_recommendations():
     week = d["week"]
     season = d["season"]
     season_type = d["season_type"]
-    ck = (
-        f"{season}_week{week}_recs"
-        if season_type == "regular"
-        else f"{season}_off_recs"
-    )
-
-    if TRADE_RECS_CACHE.exists():
-        try:
-            cached = json.loads(TRADE_RECS_CACHE.read_text())
-            if cached.get("cache_key") == ck:
-                return cached["content"]
-        except Exception:
-            pass
+    cache_key = feature_cache.user_week_key(season, week, "recs")
+    cached = feature_cache.get("trade_recs", cache_key)
+    if cached is not None:
+        return cached
 
     content = generate_trade_recommendations(
         my_team=d["team_name"],
@@ -1551,8 +1483,7 @@ def get_trades_recommendations():
         my_bench=d["bench"],
         record=d["record"],
     )
-    CACHE_DIR.mkdir(exist_ok=True)
-    TRADE_RECS_CACHE.write_text(json.dumps({"cache_key": ck, "content": content}))
+    feature_cache.set("trade_recs", cache_key, content)
     return content
 
 # NOTE: Chat persistence (threads + messages) lives in the Next.js layer now,
